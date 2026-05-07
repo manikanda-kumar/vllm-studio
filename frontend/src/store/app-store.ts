@@ -7,6 +7,8 @@ export type AppStore = AppSlice &
   ThemeSlice & {
     desktopSidebarPinnedOpen: boolean;
     setDesktopSidebarPinnedOpen: (open: boolean) => void;
+    liteMode: boolean;
+    setLiteMode: (enabled: boolean) => void;
   };
 
 const createAppStoreImpl: StateCreator<AppStore, [], [], AppStore> = (set, ...args) => ({
@@ -14,6 +16,8 @@ const createAppStoreImpl: StateCreator<AppStore, [], [], AppStore> = (set, ...ar
   ...createThemeSlice(set, ...args),
   desktopSidebarPinnedOpen: true,
   setDesktopSidebarPinnedOpen: (desktopSidebarPinnedOpen) => set({ desktopSidebarPinnedOpen }),
+  liteMode: true,
+  setLiteMode: (liteMode) => set({ liteMode }),
 });
 
 const storage = createJSONStorage(() =>
@@ -35,6 +39,7 @@ export const useAppStore = create<AppStore>()(
         sidebarWidth: state.sidebarWidth,
         fileViewerFontSize: state.fileViewerFontSize,
         lastOpenFileByProject: state.lastOpenFileByProject,
+        liteMode: state.liteMode,
       }),
       merge: (persisted, current) => ({
         ...current,

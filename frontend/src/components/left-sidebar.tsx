@@ -44,13 +44,13 @@ type ActiveSessionDetail = {
   updatedAt: string;
 };
 
-const tabs = [
-  { href: "/", label: "Status", icon: BarChart3 },
-  { href: "/usage", label: "Usage", icon: Database },
-  { href: "/agent", label: "Agent", icon: Bot },
-  { href: "/recipes", label: "Models", icon: HardDrive },
-  { href: "/logs", label: "Server", icon: Server },
-  { href: "/configs", label: "Settings", icon: Settings },
+const allTabs = [
+  { href: "/", label: "Status", icon: BarChart3, liteMode: false },
+  { href: "/usage", label: "Usage", icon: Database, liteMode: false },
+  { href: "/agent", label: "Agent", icon: Bot, liteMode: true },
+  { href: "/recipes", label: "Models", icon: HardDrive, liteMode: false },
+  { href: "/logs", label: "Server", icon: Server, liteMode: false },
+  { href: "/configs", label: "Settings", icon: Settings, liteMode: true },
 ];
 
 function LogoMark() {
@@ -94,13 +94,15 @@ function isRouteActive(pathname: string, href: string): boolean {
  */
 export function LeftSidebar({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { desktopSidebarPinnedOpen, setDesktopSidebarPinnedOpen } = useAppStore(
+  const { desktopSidebarPinnedOpen, setDesktopSidebarPinnedOpen, liteMode } = useAppStore(
     useShallow((s) => ({
       desktopSidebarPinnedOpen: s.desktopSidebarPinnedOpen,
       setDesktopSidebarPinnedOpen: s.setDesktopSidebarPinnedOpen,
+      liteMode: s.liteMode,
     })),
   );
   const isExpanded = desktopSidebarPinnedOpen;
+  const tabs = liteMode ? allTabs.filter((t) => t.liteMode) : allTabs;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeSessions, setActiveSessions] = useState<ActiveSessionDetail[]>([]);
@@ -252,7 +254,7 @@ export function LeftSidebar({ children }: { children: React.ReactNode }) {
       </div>
 
       {mobileMenuOpen ? (
-        <MobileNavigationDrawer pathname={pathname} onClose={() => setMobileMenuOpen(false)} />
+        <MobileNavigationDrawer pathname={pathname} onClose={() => setMobileMenuOpen(false)} tabs={tabs} />
       ) : null}
 
       <SessionsCommand
@@ -269,7 +271,15 @@ export function LeftSidebar({ children }: { children: React.ReactNode }) {
   );
 }
 
-function MobileNavigationDrawer({ pathname, onClose }: { pathname: string; onClose: () => void }) {
+function MobileNavigationDrawer({
+  pathname,
+  onClose,
+  tabs,
+}: {
+  pathname: string;
+  onClose: () => void;
+  tabs: typeof allTabs;
+}) {
   return (
     <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
       <button
@@ -408,7 +418,8 @@ function ThemeToggleDesktop() {
 function StopButtonDesktop() {
   const status = useSidebarStatus();
   const { stop } = useModelLifecycle();
-  if (!status.inferenceOnline) {
+  const liteMode = useAppStore((s) => s.liteMode);
+  if (liteMode || !status.inferenceOnline) {
     return <div className="h-9 w-9" />;
   }
   return (
@@ -446,7 +457,8 @@ function StatusRowDesktop() {
 function StopButtonMobile() {
   const status = useSidebarStatus();
   const { stop } = useModelLifecycle();
-  if (!status.inferenceOnline) return null;
+  const liteMode = useAppStore((s) => s.liteMode);
+  if (liteMode || !status.inferenceOnline) return null;
   return (
     <ModelStopConfirm
       onStop={stop}

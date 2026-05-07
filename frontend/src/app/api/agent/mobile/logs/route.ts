@@ -64,6 +64,17 @@ export async function GET(request: NextRequest) {
       deviceId.match(/^[A-Z0-9]{10,}$/) ||
       deviceId.includes(":");
 
+    // iOS simulator UDIDs are uppercase hex with dashes (e.g., XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX)
+    // Real iOS devices have shorter UDIDs without dashes
+    const isIosSimulator = !isAndroid && /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i.test(deviceId);
+
+    if (!isAndroid && !isIosSimulator) {
+      return Response.json({
+        error: "Log streaming not supported for real iOS devices. Use Xcode or Console.app.",
+        logs: [],
+      });
+    }
+
     const logs = isAndroid
       ? await getAndroidLogs(deviceId, lines)
       : await getIosLogs(deviceId, lines);

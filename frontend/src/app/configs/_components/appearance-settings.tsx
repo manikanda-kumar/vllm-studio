@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Palette, Search, Type, ZoomIn } from "lucide-react";
+import { Check, Layers, Palette, Search, Type, ZoomIn } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAppStore } from "@/store";
 import {
@@ -20,6 +20,8 @@ export function AppearanceSettings() {
   const setFontFamilyId = useAppStore((s) => s.setFontFamilyId);
   const fontSizeId = useAppStore((s) => s.fontSizeId);
   const setFontSizeId = useAppStore((s) => s.setFontSizeId);
+  const liteMode = useAppStore((s) => s.liteMode);
+  const setLiteMode = useAppStore((s) => s.setLiteMode);
 
   const [query, setQuery] = useState("");
 
@@ -51,6 +53,46 @@ export function AppearanceSettings() {
 
   return (
     <div className="space-y-6">
+      <section className="rounded-lg border border-(--border) bg-(--surface) p-4 sm:p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Layers className="h-4 w-4 text-(--dim)" strokeWidth={1.7} />
+          <h3 className="text-sm font-medium text-(--fg)">Interface Mode</h3>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs uppercase tracking-wide text-(--dim)">Navigation Scope</label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setLiteMode(true)}
+              className={`px-3 py-2 rounded-md border text-xs font-medium transition-colors ${
+                liteMode
+                  ? "border-(--accent) bg-(--accent) text-(--bg)"
+                  : "border-(--border) text-(--fg) hover:bg-background"
+              }`}
+            >
+              Lite (Agent Desktop)
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiteMode(false)}
+              className={`px-3 py-2 rounded-md border text-xs font-medium transition-colors ${
+                !liteMode
+                  ? "border-(--accent) bg-(--accent) text-(--bg)"
+                  : "border-(--border) text-(--fg) hover:bg-background"
+              }`}
+            >
+              Full (vLLM Infra)
+            </button>
+          </div>
+          <p className="text-[11px] text-(--dim)">
+            {liteMode
+              ? "Shows Agent + Settings only. Use when vLLM is org-managed."
+              : "Shows all tabs including Status, Usage, Models, Server logs."}
+          </p>
+        </div>
+      </section>
+
       <section className="rounded-lg border border-(--border) bg-(--surface) p-4 sm:p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Type className="h-4 w-4 text-(--dim)" strokeWidth={1.7} />

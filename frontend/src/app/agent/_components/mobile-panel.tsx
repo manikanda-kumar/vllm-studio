@@ -67,8 +67,12 @@ export function MobilePanel({ cwd }: Props) {
       }
       const online = (payload.devices ?? []).filter((d) => d.state === "online");
       setDevices(online);
-      if (online.length > 0 && !selectedDevice) {
+      // Select first device if none selected, or reset if current device disconnected
+      const currentStillOnline = selectedDevice && online.some((d) => d.id === selectedDevice);
+      if (online.length > 0 && !currentStillOnline) {
         setSelectedDevice(online[0].id);
+      } else if (online.length === 0) {
+        setSelectedDevice(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to list devices");
@@ -133,6 +137,7 @@ export function MobilePanel({ cwd }: Props) {
         setError(err instanceof Error ? err.message : "Stream failed");
         // Fallback to auto-refresh mode
         setAutoRefresh(true);
+        setStreaming(true);
       }
     } else {
       // Android/real devices: use auto-refresh mode
@@ -352,10 +357,11 @@ export function MobilePanel({ cwd }: Props) {
                   key={device.id}
                   type="button"
                   onClick={() => {
+                    if (device.id !== selectedDevice) {
+                      void stopStream();
+                    }
                     setSelectedDevice(device.id);
                     setDropdownOpen(false);
-                    setStreaming(false);
-                    setStreamInfo(null);
                   }}
                   className={`flex w-full items-center gap-2 px-2 py-1.5 text-[11px] hover:bg-(--bg) ${
                     device.id === selectedDevice ? "bg-(--bg) text-(--fg)" : "text-(--dim)"
