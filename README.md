@@ -2,6 +2,44 @@
 
 Unified local AI workstation for model lifecycle, chat/agent workflows, orchestration, observability, and remote deployment.
 
+## Lite Mode (Agent Desktop)
+
+For users who only need the coding agent without managing vLLM infrastructure:
+
+- **Default ON** - shows only Agent + Settings tabs
+- Toggle in Settings → Appearance → Interface Mode
+- Switch to "Full (vLLM Infra)" to access Status, Usage, Models, Server tabs
+
+Use Lite Mode when your org manages the vLLM deployment and you just need the agent desktop.
+
+## OpenRouter Support
+
+Connect to OpenRouter or any OpenAI-compatible API:
+
+1. Go to **Settings → Connection**
+2. Set **API URL**: `https://openrouter.ai/api`
+3. Set **API Key**: your OpenRouter key
+4. Save and select model in Agent dropdown
+
+Works with any provider exposing `/v1/models` and `/v1/chat/completions`.
+
+## Mobile Panel
+
+Test mobile apps directly from the agent workspace:
+
+- **Device control**: list, select, boot emulators/simulators
+- **Live view**: iOS streaming via serve-sim, Android via screenshot polling
+- **Touch input**: tap-to-interact on device screen
+- **Hardware buttons**: HOME, BACK, etc.
+- **Logs**: device log viewer
+
+Requires `mobilecli` (npm) for device control. Optional `serve-sim` for iOS 60fps streaming.
+
+```bash
+npm install -g mobilecli
+npm install -g serve-sim  # optional, iOS only
+```
+
 ## Release: v1.13.0
 
 This release consolidates major repo changes currently in the tree, including:
