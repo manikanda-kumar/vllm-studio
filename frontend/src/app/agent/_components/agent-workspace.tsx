@@ -23,6 +23,7 @@ import { AgentBrowser, type AgentBrowserHandle, type WebviewElement } from "./ag
 import { ChatPane, makeFreshTab, type ChatPaneHandle, type SessionTab } from "./chat-pane";
 import { FilesystemPanel } from "./filesystem-panel";
 import { GitDiffPanel } from "./git-diff-panel";
+import { MobilePanel } from "./mobile-panel";
 import { PaneGrid, type SessionDropPayload } from "./pane-grid";
 import {
   collectLeaves,
@@ -131,7 +132,7 @@ const COMPUTER_FILES_OPEN_KEY = "vllm-studio.agent.computer.filesOpen";
 const COMPUTER_DEFAULT_CLOSED_STORAGE_ID = "vllm-studio.agent.computer.defaultCollapsedV2";
 const PANE_LAYOUT_KEY = "vllm-studio.agent.paneLayout";
 
-type ComputerTab = "browser" | "files" | "diff";
+type ComputerTab = "browser" | "files" | "diff" | "mobile";
 
 function randomIdSegment(length: number): string {
   const cryptoApi = globalThis.crypto;
@@ -1342,6 +1343,17 @@ export function AgentWorkspace() {
               </button>
               <button
                 type="button"
+                onClick={() => selectComputerTab("mobile")}
+                className={`h-6 shrink-0 rounded px-2 font-medium uppercase tracking-wide ${
+                  activeComputerTab === "mobile"
+                    ? "bg-(--surface) text-(--fg)"
+                    : "hover:bg-(--surface) hover:text-(--fg)"
+                }`}
+              >
+                Mobile
+              </button>
+              <button
+                type="button"
                 onClick={() => {
                   setRightPanelOpen(false);
                   window.localStorage.setItem(COMPUTER_BROWSER_OPEN_KEY, "0");
@@ -1373,8 +1385,10 @@ export function AgentWorkspace() {
                   <FilesystemPanel cwd={activeProject?.path ?? null} />
                 </div>
               </section>
-            ) : (
+            ) : activeComputerTab === "diff" ? (
               <GitDiffPanel cwd={activeProject?.path ?? null} />
+            ) : (
+              <MobilePanel cwd={activeProject?.path ?? null} />
             )}
           </aside>
         ) : null}
