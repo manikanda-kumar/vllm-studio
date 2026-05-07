@@ -2,8 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { PageState } from "../../ui/page-state";
-import { RefreshButton } from "../../ui/refresh-button";
+import { PageState, RefreshButton } from "@/components/shared";
 import { DailyUsageChart } from "./_components/daily-usage-chart";
 import { ModelPerformanceTable } from "./_components/model-performance-table";
 import { PerformanceDetails } from "./_components/performance-details";

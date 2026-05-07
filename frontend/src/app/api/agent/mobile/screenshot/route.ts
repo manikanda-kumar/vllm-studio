@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
   }
   try {
     const imageBuffer = await captureScreenshot(deviceId);
-    return new Response(imageBuffer, {
+    return new Response(new Uint8Array(imageBuffer), {
       headers: {
         "Content-Type": "image/png",
         "Cache-Control": "no-store",
