@@ -31,6 +31,27 @@ type StreamInfo = {
   device: string;
 };
 
+type HealthPayload = {
+  nodeVersion: string;
+  nodeVersionOk: boolean;
+  npxFound: boolean;
+  mobileMcpLaunchOk: boolean;
+  mobileMcpVersion: string | null;
+  adbFound: boolean;
+  xcrunFound: boolean;
+  serveSimFound: boolean;
+  platform: "darwin" | "linux" | "win32";
+  supportedFeatures: {
+    devices: boolean;
+    screenshot: boolean;
+    tap: boolean;
+    button: boolean;
+    boot: boolean;
+    logs: boolean;
+    stream: boolean;
+  };
+};
+
 type Props = {
   cwd: string | null;
 };
@@ -49,6 +70,7 @@ export function MobilePanel({ cwd }: Props) {
   const [logs, setLogs] = useState<string[]>([]);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [tapping, setTapping] = useState(false);
+  const [health, setHealth] = useState<HealthPayload | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -265,6 +287,22 @@ export function MobilePanel({ cwd }: Props) {
     void fetchDevices();
   }, [fetchDevices]);
 
+  // Fetch health diagnostics on mount
+  useEffect(() => {
+    async function fetchHealth() {
+      try {
+        const response = await fetch("/api/agent/mobile/health", { cache: "no-store" });
+        if (response.ok) {
+          const payload = (await response.json()) as HealthPayload;
+          setHealth(payload);
+        }
+      } catch {
+        // Ignore health fetch errors
+      }
+    }
+    void fetchHealth();
+  }, []);
+
   // Capture screenshot when device selected
   useEffect(() => {
     if (selectedDevice && !streaming) {
@@ -395,7 +433,7 @@ export function MobilePanel({ cwd }: Props) {
           <button
             type="button"
             onClick={() => void startStream()}
-            disabled={!selectedDevice}
+            disabled={!selectedDevice || !health?.supportedFeatures.stream}
             className="flex h-7 w-7 items-center justify-center rounded border border-(--border) bg-(--surface) text-(--dim) hover:bg-(--bg) hover:text-(--fg) disabled:opacity-50"
             title="Start live view"
           >
@@ -407,7 +445,7 @@ export function MobilePanel({ cwd }: Props) {
         <button
           type="button"
           onClick={() => void captureScreenshot()}
-          disabled={!selectedDevice || screenshotLoading}
+          disabled={!selectedDevice || screenshotLoading || !health?.supportedFeatures.screenshot}
           className="flex h-7 w-7 items-center justify-center rounded border border-(--border) bg-(--surface) text-(--dim) hover:bg-(--bg) hover:text-(--fg) disabled:opacity-50"
           title="Capture screenshot"
         >
@@ -418,7 +456,7 @@ export function MobilePanel({ cwd }: Props) {
         <button
           type="button"
           onClick={() => void fetchDevices()}
-          disabled={loading}
+          disabled={loading || !health?.supportedFeatures.devices}
           className="flex h-7 w-7 items-center justify-center rounded border border-(--border) bg-(--surface) text-(--dim) hover:bg-(--bg) hover:text-(--fg) disabled:opacity-50"
           title="Refresh devices"
         >
@@ -429,16 +467,29 @@ export function MobilePanel({ cwd }: Props) {
         <button
           type="button"
           onClick={() => setLogsExpanded(!logsExpanded)}
+          disabled={!health?.supportedFeatures.logs}
           className={`flex h-7 w-7 items-center justify-center rounded border border-(--border) ${
             logsExpanded
               ? "bg-(--accent)/20 text-(--accent)"
               : "bg-(--surface) text-(--dim) hover:bg-(--bg) hover:text-(--fg)"
-          }`}
+          } disabled:opacity-50`}
           title="Toggle logs"
         >
           <Terminal className="h-3 w-3" />
         </button>
       </div>
+
+      {/* Health banners */}
+      {health && !health.nodeVersionOk && (
+        <div className="shrink-0 border-b border-(--border) bg-yellow-500/10 px-3 py-1.5 text-[10px] text-yellow-400">
+          Install Node 22+ for mobile device support (found {health.nodeVersion}).
+        </div>
+      )}
+      {health && health.platform === "win32" && (
+        <div className="shrink-0 border-b border-(--border) bg-(--info)/10 px-3 py-1.5 text-[10px] text-(--info)">
+          iOS device control requires macOS. Android tools are available on Windows.
+        </div>
+      )}
 
       {/* Error display */}
       {error && (
