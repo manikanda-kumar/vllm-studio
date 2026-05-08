@@ -3,9 +3,20 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { enhancedPath, npxLauncher } from "./system/spawn";
 
 const PINNED_VERSION = "0.0.54";
+
+function resolveLocalMobileMcp(): string | null {
+  try {
+    const req = createRequire(path.join(process.cwd(), "package.json"));
+    return req.resolve("@mobilenext/mobile-mcp/lib/index.js");
+  } catch {
+    return null;
+  }
+}
 
 type McpToolResult = {
   content: Array<
@@ -26,6 +37,12 @@ function resolveMobileMcpCommand(): { command: string; args: string[] } {
   if (envOverride) {
     return { command: envOverride, args: [] };
   }
+
+  const localPath = resolveLocalMobileMcp();
+  if (localPath) {
+    return { command: "node", args: [localPath] };
+  }
+
   return {
     command: npxLauncher(),
     args: ["-y", `@mobilenext/mobile-mcp@${PINNED_VERSION}`],

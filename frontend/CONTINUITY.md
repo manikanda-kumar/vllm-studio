@@ -23,31 +23,35 @@ Cross-platform mobile device integration for vLLM Studio using mobile-mcp (MCP S
 
 ### Done
 
-- Fixed Electron PATH issue in app-server.ts (adds /opt/homebrew/bin)
+- Fixed Electron PATH issue in app-server.ts (uses `enhancedPath()` helper)
 - Fixed hook jq "Argument list too long" error (use stdin instead of --argjson)
 - Installed `@modelcontextprotocol/sdk` and `@mobilenext/mobile-mcp@0.0.54`
 - Probed mobile-mcp capabilities over stdio (see Capability Matrix below)
+- Rewrote `mobile-mcp.ts` with `Client` + `StdioClientTransport`, singleton, start-lock, reconnect
+- Created cross-platform spawn helper `frontend/src/lib/system/spawn.ts`
+- Migrated API routes (devices, screenshot, tap, button) to new client with structured 503 errors
+- Packaged pi-extensions as compiled JS for Electron
+- Added health/diagnostics endpoint and UI banners
+- Implemented graceful shutdown for mobile-mcp child process
+- Pinned `@mobilenext/mobile-mcp@0.0.54` in `optionalDependencies`; local copy preferred over `npx`
 
 ### Now
 
-- Rewrite mobile-mcp.ts with stdio-based MCP client (StdioClientTransport)
-- Implement cross-platform spawn helper to eliminate hardcoded paths
+- Final acceptance gate verification
+- Remaining: boot/logs/stream path cleanup (no hardcoded paths)
 
 ### Next
 
-1. Rewrite mobile-mcp.ts with proper MCP SDK Client + StdioClientTransport
-2. Add singleton on globalThis with start-lock and reconnect logic
-3. Migrate API routes (devices, screenshot, tap, button) to new client
-4. Add health/diagnostics route and UI banners
-5. Package pi-extensions as compiled JS for Electron
-6. Implement graceful shutdown for mobile-mcp child process
+1. Apply cross-platform spawn helper to boot/logs/stream routes
+2. Update CONTINUITY.md with final out-of-scope list
+3. Run full test matrix
 
 ## Working Set
 
-- `/Users/manik/Github/vllm-studio/frontend/src/lib/mobile-mcp.ts` - MCP client (rewrite in progress)
-- `/Users/manik/Github/vllm-studio/frontend/src/lib/system/spawn.ts` - new cross-platform spawn helper
+- `/Users/manik/Github/vllm-studio/frontend/src/lib/mobile-mcp.ts` - MCP client (complete)
+- `/Users/manik/Github/vllm-studio/frontend/src/lib/system/spawn.ts` - cross-platform spawn helper
 - `/Users/manik/Github/vllm-studio/frontend/src/app/api/agent/mobile/*/route.ts` - API routes
-- `/Users/manik/Github/vllm-studio/frontend/desktop/logic/app-server.ts` - PATH fix applied
+- `/Users/manik/Github/vllm-studio/frontend/desktop/logic/app-server.ts` - graceful shutdown
 - `/Users/manik/.claude/hooks/stop_hook.sh` - jq fix applied
 
 ## Project Learnings
