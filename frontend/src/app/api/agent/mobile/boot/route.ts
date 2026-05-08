@@ -1,17 +1,15 @@
 import { NextRequest } from "next/server";
 import { spawn } from "node:child_process";
+import { enhancedPath } from "@/lib/system/spawn";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// Enhanced PATH for Electron environment
-const ENHANCED_PATH = ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH].filter(Boolean).join(":");
 
 function runMobileCli(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn("mobilecli", args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, PATH: ENHANCED_PATH },
+      env: { ...process.env, PATH: enhancedPath() },
     });
     let stdout = "";
     let stderr = "";

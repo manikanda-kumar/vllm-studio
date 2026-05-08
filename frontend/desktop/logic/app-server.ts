@@ -6,6 +6,7 @@ import { DESKTOP_CONFIG, resolveStandaloneBaseDir, resolveStaticAssetsSource } f
 import type { DesktopServerRuntime } from "../types";
 import { log } from "../helpers/logger";
 import { allocatePort } from "../helpers/ports";
+import { enhancedPath } from "../../src/lib/system/spawn";
 
 interface ServerHandle {
   runtime: DesktopServerRuntime;
@@ -85,16 +86,14 @@ export async function startFrontendServer(): Promise<ServerHandle> {
   log.info(`Starting embedded frontend server from ${serverScript} on ${url}`);
 
   // Electron on macOS doesn't inherit shell PATH. Add common tool locations.
-  const extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
-  const currentPath = process.env.PATH || "";
-  const enhancedPath = [...extraPaths, currentPath].join(":");
+  const pathEnv = enhancedPath();
 
   const child = fork(serverScript, {
     cwd: serverRoot,
     stdio: "pipe",
     env: {
       ...process.env,
-      PATH: enhancedPath,
+      PATH: pathEnv,
       NODE_ENV: "production",
       PORT: String(port),
       HOSTNAME: "127.0.0.1",

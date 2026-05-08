@@ -3,8 +3,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import path from "node:path";
-import os from "node:os";
+import { enhancedPath, npxLauncher } from "./system/spawn";
 
 const PINNED_VERSION = "0.0.54";
 
@@ -21,24 +20,6 @@ type HealthStatus = {
   version: string | null;
   toolCount: number;
 };
-
-function enhancedPath(): string {
-  const platform = os.platform();
-  const extraDirs: string[] = [];
-  if (platform === "darwin") {
-    extraDirs.push("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin");
-  } else if (platform === "linux") {
-    extraDirs.push("/usr/local/bin", "/usr/bin");
-  } else if (platform === "win32") {
-    if (process.env.APPDATA) extraDirs.push(path.join(process.env.APPDATA, "npm"));
-    if (process.env.ProgramFiles) extraDirs.push(path.join(process.env.ProgramFiles, "nodejs"));
-  }
-  return [...extraDirs, process.env.PATH].filter(Boolean).join(path.delimiter);
-}
-
-function npxLauncher(): string {
-  return os.platform() === "win32" ? "npx.cmd" : "npx";
-}
 
 function resolveMobileMcpCommand(): { command: string; args: string[] } {
   const envOverride = process.env.VLLM_STUDIO_MOBILE_MCP_BIN;

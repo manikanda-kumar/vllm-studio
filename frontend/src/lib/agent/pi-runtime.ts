@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { getApiSettings, type ApiSettings } from "@/lib/api-settings";
 import { resolveDataDir } from "@/lib/data-dir";
+import { enhancedPath } from "@/lib/system/spawn";
 import { normalizeOpenAIModels, modelsToPiModels, type AgentModel } from "./models";
 import { listProjectsFromStore } from "./projects-store";
 
@@ -144,8 +145,8 @@ function piBinaryPath(): string {
 }
 
 function piPathEnv(): string {
-  const additions = ["/opt/homebrew/bin", path.join(homedir(), ".bun", "bin")];
-  return [...additions, process.env.PATH ?? ""].filter(Boolean).join(path.delimiter);
+  const bunDir = path.join(homedir(), ".bun", "bin");
+  return [bunDir, enhancedPath()].filter(Boolean).join(path.delimiter);
 }
 
 async function fetchModelsFromBackend(settings: ApiSettings): Promise<AgentModel[]> {
