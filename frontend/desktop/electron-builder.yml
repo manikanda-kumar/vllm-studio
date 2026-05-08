@@ -23,8 +23,8 @@ extraResources:
     to: app/frontend/.next/standalone/frontend/public
     filter:
       - "**/*"
-  - from: desktop/resources/pi-extensions
-    to: desktop/resources/pi-extensions
+  - from: desktop/resources/pi-extensions/dist
+    to: desktop/resources/pi-extensions/dist
     filter:
       - "**/*"
 

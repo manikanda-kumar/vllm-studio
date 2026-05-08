@@ -76,55 +76,45 @@ async function resolveAgentCwd(input?: string): Promise<string> {
   return resolved;
 }
 
-// Locate the bundled browser extension. In dev it sits next to the source
-// files; in a packaged Electron app it ships under
-// process.resourcesPath/desktop/resources/pi-extensions/. We accept either.
+// Locate the compiled browser extension.
+// In production Electron sets VLLM_STUDIO_PI_EXTENSION_BROWSER_PATH.
+// In dev we fall back to a single deterministic repo-relative path.
 function resolveBrowserExtensionPath(): string | null {
-  const candidates = [
-    process.env.VLLM_STUDIO_BROWSER_EXTENSION_PATH,
-    process.resourcesPath
-      ? path.join(process.resourcesPath, "desktop", "resources", "pi-extensions", "browser.ts")
-      : null,
-    path.resolve(process.cwd(), "frontend", "desktop", "resources", "pi-extensions", "browser.ts"),
-    path.resolve(process.cwd(), "desktop", "resources", "pi-extensions", "browser.ts"),
-    path.resolve(
+  const envPath = process.env.VLLM_STUDIO_PI_EXTENSION_BROWSER_PATH;
+  if (envPath) return envPath;
+
+  if (process.env.NODE_ENV !== "production") {
+    const devPath = path.resolve(
       process.cwd(),
-      "..",
-      "frontend",
       "desktop",
       "resources",
       "pi-extensions",
-      "browser.ts",
-    ),
-  ].filter((value): value is string => Boolean(value));
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
+      "dist",
+      "browser.js",
+    );
+    if (existsSync(devPath)) return devPath;
   }
+
   return null;
 }
 
-// Locate the bundled mobile extension for device interaction tools.
+// Locate the compiled mobile extension.
 function resolveMobileExtensionPath(): string | null {
-  const candidates = [
-    process.env.VLLM_STUDIO_MOBILE_EXTENSION_PATH,
-    process.resourcesPath
-      ? path.join(process.resourcesPath, "desktop", "resources", "pi-extensions", "mobile.ts")
-      : null,
-    path.resolve(process.cwd(), "frontend", "desktop", "resources", "pi-extensions", "mobile.ts"),
-    path.resolve(process.cwd(), "desktop", "resources", "pi-extensions", "mobile.ts"),
-    path.resolve(
+  const envPath = process.env.VLLM_STUDIO_PI_EXTENSION_MOBILE_PATH;
+  if (envPath) return envPath;
+
+  if (process.env.NODE_ENV !== "production") {
+    const devPath = path.resolve(
       process.cwd(),
-      "..",
-      "frontend",
       "desktop",
       "resources",
       "pi-extensions",
-      "mobile.ts",
-    ),
-  ].filter((value): value is string => Boolean(value));
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
+      "dist",
+      "mobile.js",
+    );
+    if (existsSync(devPath)) return devPath;
   }
+
   return null;
 }
 

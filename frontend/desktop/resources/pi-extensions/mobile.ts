@@ -11,7 +11,9 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 
 type ToolResult = {
-  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
+  content: Array<
+    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+  >;
   details: Record<string, unknown>;
 };
 
@@ -21,7 +23,7 @@ async function callMobileAction(
   endpoint: string,
   method: "GET" | "POST",
   params: Record<string, unknown>,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
 ): Promise<ToolResult> {
   let url = `${FRONTEND_BASE}/api/agent/mobile/${endpoint}`;
   const init: RequestInit = { method, signal };
@@ -100,7 +102,12 @@ export default function registerMobileExtension(pi: ExtensionAPI) {
       y: Type.Number({ description: "Y coordinate to tap" }),
     }),
     async execute(_id, params, signal) {
-      return callMobileAction("tap", "POST", { device: params.device, x: params.x, y: params.y }, signal);
+      return callMobileAction(
+        "tap",
+        "POST",
+        { device: params.device, x: params.x, y: params.y },
+        signal,
+      );
     },
   });
 
@@ -111,10 +118,17 @@ export default function registerMobileExtension(pi: ExtensionAPI) {
       "Press a hardware button on the mobile device. Common buttons: home, back, menu, power, volume_up, volume_down.",
     parameters: Type.Object({
       device: Type.String({ description: "Device ID from mobile_list_devices" }),
-      button: Type.String({ description: "Button name: home, back, menu, power, volume_up, volume_down" }),
+      button: Type.String({
+        description: "Button name: home, back, menu, power, volume_up, volume_down",
+      }),
     }),
     async execute(_id, params, signal) {
-      return callMobileAction("button", "POST", { device: params.device, button: params.button }, signal);
+      return callMobileAction(
+        "button",
+        "POST",
+        { device: params.device, button: params.button },
+        signal,
+      );
     },
   });
 
@@ -137,10 +151,17 @@ export default function registerMobileExtension(pi: ExtensionAPI) {
       "Get recent device logs (logcat for Android, system log for iOS). Useful for debugging app crashes or errors.",
     parameters: Type.Object({
       device: Type.String({ description: "Device ID from mobile_list_devices" }),
-      lines: Type.Optional(Type.Number({ description: "Number of recent log lines to return (default: 100)" })),
+      lines: Type.Optional(
+        Type.Number({ description: "Number of recent log lines to return (default: 100)" }),
+      ),
     }),
     async execute(_id, params, signal) {
-      return callMobileAction("logs", "GET", { device: params.device, lines: params.lines }, signal);
+      return callMobileAction(
+        "logs",
+        "GET",
+        { device: params.device, lines: params.lines },
+        signal,
+      );
     },
   });
 }

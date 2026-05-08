@@ -21,7 +21,7 @@ const FRONTEND_BASE = process.env.VLLM_STUDIO_FRONTEND_BASE ?? "http://127.0.0.1
 async function callBrowserAction(
   verb: string,
   payload: Record<string, unknown>,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
 ): Promise<ToolResult> {
   const response = await fetch(`${FRONTEND_BASE}/api/agent/browser/${verb}`, {
     method: "POST",

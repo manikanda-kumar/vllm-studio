@@ -6,7 +6,7 @@ import { DESKTOP_CONFIG, resolveStandaloneBaseDir, resolveStaticAssetsSource } f
 import type { DesktopServerRuntime } from "../types";
 import { log } from "../helpers/logger";
 import { allocatePort } from "../helpers/ports";
-import { enhancedPath } from "../../src/lib/system/spawn";
+import { enhancedPath } from "../helpers/spawn";
 
 interface ServerHandle {
   runtime: DesktopServerRuntime;

@@ -1,4 +1,5 @@
 import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import path from "node:path";
 import type { DesktopAppState } from "./types";
 import { log } from "./helpers/logger";
 import { isHttpUrl } from "./helpers/url";
@@ -123,6 +124,20 @@ async function run(): Promise<void> {
   registerIpcHandlers();
 
   await app.whenReady();
+
+  // Resolve compiled pi-extension paths so the packaged app never depends on
+  // the source tree or process.cwd().
+  if (process.resourcesPath) {
+    const extensionsDir = path.join(
+      process.resourcesPath,
+      "desktop",
+      "resources",
+      "pi-extensions",
+      "dist",
+    );
+    process.env.VLLM_STUDIO_PI_EXTENSION_MOBILE_PATH = path.join(extensionsDir, "mobile.js");
+    process.env.VLLM_STUDIO_PI_EXTENSION_BROWSER_PATH = path.join(extensionsDir, "browser.js");
+  }
 
   initializeAutoUpdates();
 
