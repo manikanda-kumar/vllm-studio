@@ -1,0 +1,60 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "vLLM Studio" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e18]: vLLM Studio
+      - navigation [ref=e19]:
+        - button "Search sessions ⌘K" [ref=e20]:
+          - img [ref=e21]
+          - generic [ref=e24]: Search sessions
+          - generic [ref=e25]: ⌘K
+        - generic [ref=e26]: Workspace
+        - link "Agent" [ref=e27] [cursor=pointer]:
+          - /url: /agent
+          - img [ref=e28]
+          - generic [ref=e31]: Agent
+        - link "Settings" [ref=e32] [cursor=pointer]:
+          - /url: /configs
+          - img [ref=e33]
+          - generic [ref=e36]: Settings
+        - generic [ref=e37]:
+          - generic [ref=e38]: Projects
+          - button "Add project" [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e42]: Add project
+          - button "No projects yet — pick a folder to get started." [ref=e43]
+      - generic [ref=e45]:
+        - button "Collapse sidebar" [ref=e46]:
+          - img [ref=e47]
+        - button "Light mode" [ref=e51]:
+          - img [ref=e52]
+        - generic "offline" [ref=e58]
+    - main [ref=e60]:
+      - generic [ref=e63]:
+        - button "Show computer" [ref=e64]:
+          - img [ref=e65]
+        - generic [ref=e70]:
+          - generic [ref=e73]:
+            - heading "What should we work on?" [level=1] [ref=e74]
+            - paragraph [ref=e75]: Ask the agent to edit, inspect, or run something. Tab to queue · paste/drop files.
+          - generic [ref=e76]:
+            - generic [ref=e77]:
+              - textbox "Loading models…" [ref=e78]
+              - generic [ref=e79]:
+                - button "Attach files" [ref=e80]:
+                  - img [ref=e81]
+                - 'button "Browser tool: OFF — click to let the agent navigate, click, fill, and read pages" [ref=e83]':
+                  - img [ref=e84]
+                - button "Loading…" [disabled] [ref=e88]:
+                  - generic [ref=e89]: Loading…
+                  - img [ref=e90]
+                - button "Send" [disabled] [ref=e93]:
+                  - img [ref=e94]
+            - generic [ref=e96]:
+              - generic [ref=e97]: R 0
+              - generic [ref=e98]: W 0
+              - generic [ref=e99]: 0/0
+  - button "Open Next.js Dev Tools" [ref=e109] [cursor=pointer]:
+    - img [ref=e110]

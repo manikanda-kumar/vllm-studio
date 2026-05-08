@@ -1,0 +1,369 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "vLLM Studio" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e18]: vLLM Studio
+      - navigation [ref=e19]:
+        - button "Search sessions ⌘K" [ref=e20]:
+          - img [ref=e21]
+          - generic [ref=e24]: Search sessions
+          - generic [ref=e25]: ⌘K
+        - generic [ref=e26]: Workspace
+        - link "Agent" [ref=e27] [cursor=pointer]:
+          - /url: /agent
+          - img [ref=e28]
+          - generic [ref=e31]: Agent
+        - link "Settings" [ref=e32] [cursor=pointer]:
+          - /url: /configs
+          - img [ref=e33]
+          - generic [ref=e36]: Settings
+        - generic [ref=e37]:
+          - generic [ref=e38]: Projects
+          - button "Add project" [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e42]: Add project
+          - generic [ref=e44]:
+            - button "clicky" [ref=e45]:
+              - img [ref=e46]
+              - img [ref=e48]
+              - generic [ref=e50]: clicky
+            - button "Remove project" [ref=e51]:
+              - img [ref=e52]
+      - generic [ref=e55]:
+        - button "Collapse sidebar" [ref=e56]:
+          - img [ref=e57]
+        - button "Light mode" [ref=e61]:
+          - img [ref=e62]
+        - generic "offline" [ref=e68]
+    - main [ref=e70]:
+      - generic [ref=e72]:
+        - generic [ref=e73]:
+          - button "Hide computer" [pressed] [ref=e372]:
+            - img [ref=e75]
+          - generic [ref=e80]:
+            - generic [ref=e83]:
+              - article [ref=e124]:
+                - generic [ref=e125]:
+                  - generic [ref=e126]: You
+                  - generic [ref=e127]: what does this repo do?
+              - article [ref=e128]:
+                - generic [ref=e129]: Pi
+                - generic [ref=e130]:
+                  - group [ref=e131]:
+                    - generic "read · done" [ref=e132] [cursor=pointer]:
+                      - generic [ref=e133]: read
+                      - generic [ref=e134]: · done
+                  - group [ref=e135]:
+                    - generic "bash · done" [ref=e136] [cursor=pointer]:
+                      - generic [ref=e137]: bash
+                      - generic [ref=e138]: · done
+              - article [ref=e139]:
+                - generic [ref=e140]: Pi
+                - generic [ref=e142]:
+                  - paragraph [ref=e143]:
+                    - text: This repo is a macOS
+                    - strong [ref=e144]: menu bar-only voice companion app
+                    - text: .
+                  - paragraph [ref=e145]: "In plain terms, it:"
+                  - list [ref=e146]:
+                    - listitem [ref=e147]:
+                      - text: lives in the
+                      - strong [ref=e148]: status bar
+                      - text: with no dock icon or main window
+                    - listitem [ref=e149]:
+                      - text: opens a
+                      - strong [ref=e150]: floating control panel
+                      - text: when you click the menu bar icon
+                    - listitem [ref=e151]:
+                      - text: supports
+                      - strong [ref=e152]: push-to-talk
+                      - text: via a global shortcut
+                    - listitem [ref=e153]:
+                      - text: captures microphone audio and
+                      - strong [ref=e154]: transcribes speech
+                    - listitem [ref=e155]:
+                      - text: takes a
+                      - strong [ref=e156]: screenshot of your screen
+                    - listitem [ref=e157]: sends the transcript + screenshot to an assistant
+                    - listitem [ref=e158]:
+                      - text: can
+                      - strong [ref=e159]: speak back
+                      - text: using TTS
+                    - listitem [ref=e160]:
+                      - text: can also
+                      - strong [ref=e161]: point at UI elements
+                      - text: with a blue cursor overlay
+                  - paragraph [ref=e162]: "Core stack:"
+                  - list [ref=e163]:
+                    - listitem [ref=e164]:
+                      - strong [ref=e165]: SwiftUI / AppKit
+                    - listitem [ref=e166]:
+                      - strong [ref=e167]: ScreenCaptureKit
+                      - text: for screenshots
+                    - listitem [ref=e168]:
+                      - strong [ref=e169]: AVAudioEngine
+                      - text: for mic capture
+                    - listitem [ref=e170]:
+                      - text: AI providers including
+                      - strong [ref=e171]: Claude via a Cloudflare Worker
+                      - text: ", plus"
+                      - strong [ref=e172]: OpenAI fallback
+                    - listitem [ref=e173]:
+                      - text: transcription options including
+                      - strong [ref=e174]: AssemblyAI
+                      - text: ","
+                      - strong [ref=e175]: OpenAI
+                      - text: ", and"
+                      - strong [ref=e176]: Apple Speech
+                    - listitem [ref=e177]:
+                      - strong [ref=e178]: ElevenLabs
+                      - text: for TTS, with a local macOS speech fallback
+                  - paragraph [ref=e179]:
+                    - text: So it’s basically a
+                    - strong [ref=e180]: voice-driven macOS assistant / companion app
+                    - text: that can see the screen, listen to you, respond verbally, and visually point to things on the screen.
+                  - paragraph [ref=e181]: "If you want, I can also give you:"
+                  - list [ref=e182]:
+                    - listitem [ref=e183]:
+                      - text: a
+                      - strong [ref=e184]: high-level architecture map
+                      - text: ", or"
+                    - listitem [ref=e185]:
+                      - text: a
+                      - strong [ref=e186]: “how the flow works end-to-end”
+                      - text: walkthrough.
+              - article [ref=e187]:
+                - generic [ref=e188]:
+                  - generic [ref=e189]: You
+                  - generic [ref=e190]: can you give a visual codebase map of the project?
+              - article [ref=e191]:
+                - generic [ref=e192]: Pi
+                - group [ref=e194]:
+                  - generic "read · error" [ref=e195] [cursor=pointer]:
+                    - generic [ref=e196]: read
+                    - generic [ref=e197]: · error
+              - article [ref=e198]:
+                - generic [ref=e199]: Pi
+                - group [ref=e201]:
+                  - generic "read · error" [ref=e202] [cursor=pointer]:
+                    - generic [ref=e203]: read
+                    - generic [ref=e204]: · error
+              - article [ref=e205]:
+                - generic [ref=e206]: Pi
+                - group [ref=e208]:
+                  - generic "read · error" [ref=e209] [cursor=pointer]:
+                    - generic [ref=e210]: read
+                    - generic [ref=e211]: · error
+              - article [ref=e212]:
+                - generic [ref=e213]: Pi
+                - group [ref=e215]:
+                  - generic "bash · done" [ref=e216] [cursor=pointer]:
+                    - generic [ref=e217]: bash
+                    - generic [ref=e218]: · done
+              - article [ref=e219]:
+                - generic [ref=e220]: Pi
+                - group [ref=e222]:
+                  - generic "read · done" [ref=e223] [cursor=pointer]:
+                    - generic [ref=e224]: read
+                    - generic [ref=e225]: · done
+              - article [ref=e226]:
+                - generic [ref=e227]: Pi
+                - group [ref=e229]:
+                  - generic "read · done" [ref=e230] [cursor=pointer]:
+                    - generic [ref=e231]: read
+                    - generic [ref=e232]: · done
+              - article [ref=e233]:
+                - generic [ref=e234]: Pi
+                - group [ref=e236]:
+                  - generic "read · done" [ref=e237] [cursor=pointer]:
+                    - generic [ref=e238]: read
+                    - generic [ref=e239]: · done
+              - article [ref=e240]:
+                - generic [ref=e241]: Pi
+                - group [ref=e243]:
+                  - generic "read · done" [ref=e244] [cursor=pointer]:
+                    - generic [ref=e245]: read
+                    - generic [ref=e246]: · done
+              - article [ref=e247]:
+                - generic [ref=e248]: Pi
+                - group [ref=e250]:
+                  - generic "read · done" [ref=e251] [cursor=pointer]:
+                    - generic [ref=e252]: read
+                    - generic [ref=e253]: · done
+              - article [ref=e254]:
+                - generic [ref=e255]: Pi
+                - generic [ref=e257]:
+                  - paragraph [ref=e258]: Yes — I generated a visual codebase map for you by reading the repo’s architecture docs.
+                  - paragraph [ref=e259]: "The best existing visual map is here:"
+                  - list [ref=e260]:
+                    - listitem [ref=e261]:
+                      - code [ref=e262]: docs/architecture-diagram.md
+                  - paragraph [ref=e263]: "It includes:"
+                  - list [ref=e264]:
+                    - listitem [ref=e265]:
+                      - text: a
+                      - strong [ref=e266]: runtime architecture diagram
+                    - listitem [ref=e267]:
+                      - text: a
+                      - strong [ref=e268]: push-to-talk sequence diagram
+                    - listitem [ref=e269]:
+                      - text: a breakdown of
+                      - strong [ref=e270]: component ownership
+                    - listitem [ref=e271]:
+                      - text: "the split between:"
+                      - list [ref=e272]:
+                        - listitem [ref=e273]:
+                          - strong [ref=e274]: macOS app
+                        - listitem [ref=e275]:
+                          - strong [ref=e276]: optional Cloudflare Worker
+                        - listitem [ref=e277]:
+                          - strong [ref=e278]: external providers
+                          - text: like OpenAI, Anthropic, AssemblyAI, ElevenLabs
+                  - paragraph [ref=e279]:
+                    - text: If you want, I can also turn this into a
+                    - strong [ref=e280]: cleaner, more polished HTML visual map
+                    - text: "with:"
+                  - list [ref=e281]:
+                    - listitem [ref=e282]: clickable sections
+                    - listitem [ref=e283]: nicer styling
+                    - listitem [ref=e284]: a clearer “file → responsibility → data flow” layout
+                  - paragraph [ref=e285]: and save it as a browser-openable diagram.
+              - article [ref=e286]:
+                - generic [ref=e287]:
+                  - generic [ref=e288]: You
+                  - generic [ref=e289]: open the architecture-diagram.md in the browser
+              - article [ref=e290]:
+                - generic [ref=e291]: Pi
+                - group [ref=e293]:
+                  - generic "browser_navigate · error" [ref=e294] [cursor=pointer]:
+                    - generic [ref=e295]: browser_navigate
+                    - generic [ref=e296]: · error
+              - article [ref=e297]:
+                - generic [ref=e298]: Pi
+                - generic [ref=e300]:
+                  - paragraph [ref=e301]: I can’t open it in the embedded browser right now because the browser panel isn’t mounted.
+                  - paragraph [ref=e302]: "If you want, I can still help in either of these ways:"
+                  - list [ref=e303]:
+                    - listitem [ref=e304]:
+                      - text: render a
+                      - strong [ref=e305]: new HTML visual map
+                      - text: and open that instead
+                    - listitem [ref=e306]:
+                      - text: paste the
+                      - strong [ref=e307]: diagram content
+                      - text: here in a cleaner format
+              - article [ref=e308]:
+                - generic [ref=e309]:
+                  - generic [ref=e310]: You
+                  - generic [ref=e311]: can you mount the browser panel?
+              - article [ref=e312]:
+                - generic [ref=e313]: Pi
+                - generic [ref=e315]:
+                  - paragraph [ref=e316]: I can’t mount or control the embedded browser panel from here.
+                  - paragraph [ref=e317]:
+                    - text: What I
+                    - emphasis [ref=e318]: can
+                    - text: "do:"
+                  - list [ref=e319]:
+                    - listitem [ref=e320]: create a browser-openable HTML version of the architecture map
+                    - listitem [ref=e321]: give you a local file path to open
+                    - listitem [ref=e322]: help you inspect the Markdown content directly in chat
+                  - paragraph [ref=e323]: If you want, I can generate a polished visual map now.
+              - article [ref=e324]:
+                - generic [ref=e325]:
+                  - generic [ref=e326]: You
+                  - generic [ref=e327]: how do i mount the browser panel?
+              - article [ref=e328]:
+                - generic [ref=e329]: Pi
+                - generic [ref=e331]:
+                  - paragraph [ref=e332]: Usually the browser panel is mounted by starting the browser-capable UI/session in the host app, then reconnecting the agent to it.
+                  - paragraph [ref=e333]: "Common things to try:"
+                  - list [ref=e334]:
+                    - listitem [ref=e335]: reopen the session in a mode that supports browser tools
+                    - listitem [ref=e336]: make sure the embedded browser panel is enabled in the host UI
+                    - listitem [ref=e337]: if there’s a “browser” or “panel” toggle, turn it on and reload the workspace
+                    - listitem [ref=e338]: restart the agent session after the panel is available
+                  - paragraph [ref=e339]: "If you want, I can help you troubleshoot it step by step — tell me:"
+                  - list [ref=e340]:
+                    - listitem [ref=e341]: what app you’re using this in
+                    - listitem [ref=e342]: whether you see any browser/panel toggle
+                    - listitem [ref=e343]: any error text besides “Browser panel not mounted”
+              - article [ref=e344]:
+                - generic [ref=e345]:
+                  - generic [ref=e346]: You
+                  - generic [ref=e347]: open the architecuture-diagram.md file in the browser panel
+              - article [ref=e348]:
+                - generic [ref=e349]: Pi
+                - generic [ref=e351]:
+                  - paragraph [ref=e352]: I can’t directly mount or open the embedded browser panel from here, so I’m unable to load that Markdown file in it.
+                  - paragraph [ref=e353]: "Fastest workaround:"
+                  - list [ref=e354]:
+                    - listitem [ref=e355]:
+                      - text: I can generate a
+                      - strong [ref=e356]: browser-ready HTML version
+                      - text: of
+                      - code [ref=e357]: docs/architecture-diagram.md
+                    - listitem [ref=e358]: then you can open that in your browser panel or locally
+                  - paragraph [ref=e359]: If you want, I’ll do that next.
+            - generic [ref=e86]:
+              - generic [ref=e87]:
+                - 'textbox "Ask AI21: Jamba Large 1.7 (Enter) · queue with Tab · paste/drop files" [ref=e360]'
+                - generic [ref=e89]:
+                  - button "Attach files" [ref=e90]:
+                    - img [ref=e91]
+                  - 'button "Browser tool: OFF — click to let the agent navigate, click, fill, and read pages" [ref=e93]':
+                    - img [ref=e94]
+                  - combobox "Session directory" [disabled] [ref=e362]:
+                    - option "/Users/manik/Github/clicky" [selected]
+                  - generic [ref=e363]:
+                    - img [ref=e364]
+                    - generic [ref=e366]: main
+                  - generic [ref=e367]:
+                    - generic [ref=e368]: "+19"
+                    - generic [ref=e369]: "-0"
+                    - generic [ref=e370]: · 5 files
+                  - 'button "AI21: Jamba Large 1.7" [ref=e371]':
+                    - generic [ref=e99]: "AI21: Jamba Large 1.7"
+                    - img [ref=e100]
+                  - button "Send" [disabled] [ref=e103]:
+                    - img [ref=e104]
+              - generic [ref=e106]:
+                - generic [ref=e107]: R 168
+                - generic [ref=e108]: W 77
+                - generic [ref=e109]: 38.1K/128.0K
+        - complementary [ref=e373]:
+          - separator "Resize computer" [ref=e374]
+          - generic [ref=e375]:
+            - 'generic "Computer follows focused session: what does this repo do?" [ref=e376]': what does this repo do?
+            - button "Browser" [ref=e377]
+            - button "Files" [ref=e378]
+            - button "Diff" [ref=e379]
+            - button "Mobile" [ref=e380]
+            - button "Close computer" [ref=e381]:
+              - img [ref=e382]
+          - generic [ref=e384]:
+            - generic [ref=e385]:
+              - button "Back" [disabled] [ref=e386]:
+                - img [ref=e387]
+              - button "Forward" [disabled] [ref=e389]:
+                - img [ref=e390]
+              - button "Reload" [ref=e392]:
+                - img [ref=e393]
+              - textbox "Browser address" [active] [ref=e395]:
+                - /placeholder: Search or enter URL
+                - text: file:///Users/manik/Github/clicky/docs/architecture-diagram.md
+              - button "Reader" [ref=e396]
+              - button "Close browser" [ref=e397]:
+                - img [ref=e398]
+            - generic [ref=e402]:
+              - generic [ref=e403]: file:///Users/manik/Github/clicky/docs/architecture-diagram.md
+              - heading "architecture-diagram.md" [level=1] [ref=e430]
+              - article [ref=e405]:
+                - text: "# Clicky Architecture Diagram This document captures the current runtime architecture for Clicky as it exists in this repo today. It focuses on: - the macOS app's main runtime components - the optional Cloudflare Worker proxy - the external providers and system frameworks the app depends on - the end-to-end push-to-talk interaction loop ## Runtime Architecture ```mermaid flowchart LR user[User] subgraph macOS[macOS Device] subgraph app[Clicky App] appEntry[leanring_buddyApp.swift\\nCompanionAppDelegate] menuBar[MenuBarPanelManager\\nStatus item + floating panel] panelView[CompanionPanelView\\nSwiftUI controls] companionManager[CompanionManager\\nOrchestration state machine] shortcutMonitor[GlobalPushToTalkShortcutMonitor] dictationManager[BuddyDictationManager] transcriptionFactory[BuddyTranscriptionProvider] screenCapture[CompanionScreenCaptureUtility] groundingCoordinator[GroundingCoordinator] nativeAutomation[NativeMacOSAutomationProvider] overlayWindow[OverlayWindow\\nCursor + response overlay] chatProviders[Chat Providers\\nClaudeWorkerChatProvider\\nOpenAIChatProvider] ttsClients[Speech Output\\nElevenLabsTTSClient\\nSystemTTSClient] appConfig[AppBundleConfiguration] analytics[ClickyAnalytics] end subgraph system[macOS Frameworks and Permissions] avAudio[AVAudioEngine] screenCaptureKit[ScreenCaptureKit] accessibility[Accessibility APIs] speechFramework[Speech Framework] appKitSwiftUI[AppKit + SwiftUI] systemSpeech[System Speech Synthesizer] end end subgraph worker[Optional Cloudflare Worker] workerRoutes[worker/src/index.ts\\n/chat\\n/tts\\n/transcribe-token] end subgraph external[External Providers] openAI[OpenAI\\nchat + transcription + computer use] anthropic[Anthropic Claude] assemblyAI[AssemblyAI streaming] elevenLabs[ElevenLabs TTS] posthog[PostHog] end user --> menuBar menuBar --> panelView appEntry --> menuBar appEntry --> companionManager panelView --> companionManager shortcutMonitor --> companionManager companionManager --> dictationManager dictationManager --> transcriptionFactory dictationManager --> avAudio transcriptionFactory --> speechFramework companionManager --> screenCapture screenCapture --> screenCaptureKit companionManager --> chatProviders companionManager --> groundingCoordinator groundingCoordinator --> nativeAutomation nativeAutomation --> accessibility groundingCoordinator --> openAI groundingCoordinator --> overlayWindow companionManager --> ttsClients ttsClients --> systemSpeech companionManager --> overlayWindow overlayWindow --> appKitSwiftUI companionManager --> analytics analytics --> posthog appConfig --> companionManager appConfig --> dictationManager appConfig --> chatProviders appConfig --> ttsClients appConfig --> groundingCoordinator chatProviders --> workerRoutes ttsClients --> workerRoutes transcriptionFactory --> workerRoutes chatProviders --> openAI transcriptionFactory --> openAI workerRoutes --> anthropic workerRoutes --> assemblyAI workerRoutes --> elevenLabs ``` ## Push-to-Talk Request Flow Editable Excalidraw source:"
+                - button "push-to-talk-flow.excalidraw" [ref=e431]
+                - text: "```mermaid sequenceDiagram participant User participant Shortcut as Shortcut Monitor participant Manager as CompanionManager participant Dictation as BuddyDictationManager participant STT as Transcription Provider participant Capture as ScreenCaptureUtility participant Chat as Chat Provider participant Grounding as GroundingCoordinator participant Overlay as OverlayWindow participant TTS as Speech Output User->>Shortcut: Hold ctrl + option Shortcut->>Manager: Start listening Manager->>Dictation: Begin dictation session Dictation->>STT: Stream or buffer microphone audio User->>Shortcut: Release ctrl + option Shortcut->>Manager: Stop listening Dictation->>Manager: Final transcript Manager->>Capture: Capture active displays Capture->>Manager: Screenshots Manager->>Chat: Transcript + screenshots + history Chat->>Manager: Assistant response Manager->>Grounding: Resolve UI target from response Grounding->>Manager: Point target or no target par Visual guidance Manager->>Overlay: Show response bubble and cursor and Spoken guidance Manager->>TTS: Speak assistant response end ``` ## Provider Routing The repo currently supports two runtime modes: - Worker-backed mode: - Claude chat goes through `/chat` - ElevenLabs speech goes through `/tts` - AssemblyAI streaming gets a temporary token from `/transcribe-token` - Local OpenAI-first mode: - chat can call OpenAI directly from the app - transcription can call OpenAI directly from the app - grounding can use OpenAI computer use directly from the app - speech falls back to macOS system TTS when the worker-backed ElevenLabs path is unavailable ## Component Ownership - `CompanionManager` is the main orchestrator and state machine. - `BuddyDictationManager` owns the microphone and transcription lifecycle. - `GroundingCoordinator` decides how UI targets are resolved. - `OverlayWindow` renders the on-screen cursor, response bubble, waveform, and pointing animation. - `MenuBarPanelManager` and `CompanionPanelView` own the menu bar UI. - `worker/src/index.ts` is only a proxy layer, not the core application logic."
+  - button "Open Next.js Dev Tools" [ref=e119] [cursor=pointer]:
+    - img [ref=e120]
+  - alert [ref=e123]

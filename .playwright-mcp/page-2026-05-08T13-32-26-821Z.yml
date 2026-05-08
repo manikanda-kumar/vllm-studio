@@ -1,0 +1,71 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "vLLM Studio" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e18]: vLLM Studio
+      - navigation [ref=e19]:
+        - button "Search sessions ⌘K" [ref=e20]:
+          - img [ref=e21]
+          - generic [ref=e24]: Search sessions
+          - generic [ref=e25]: ⌘K
+        - generic [ref=e26]: Workspace
+        - link "Agent" [ref=e27] [cursor=pointer]:
+          - /url: /agent
+          - img [ref=e28]
+          - generic [ref=e31]: Agent
+        - link "Settings" [ref=e32] [cursor=pointer]:
+          - /url: /configs
+          - img [ref=e33]
+          - generic [ref=e36]: Settings
+        - generic [ref=e37]:
+          - generic [ref=e38]: Projects
+          - button "Add project" [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e42]: Add project
+          - generic [ref=e44]:
+            - button "clicky" [ref=e45]:
+              - img [ref=e46]
+              - img [ref=e48]
+              - generic [ref=e50]: clicky
+            - button "Remove project" [ref=e51]:
+              - img [ref=e52]
+      - generic [ref=e55]:
+        - button "Collapse sidebar" [ref=e56]:
+          - img [ref=e57]
+        - button "Light mode" [ref=e61]:
+          - img [ref=e62]
+        - generic "offline" [ref=e68]
+    - main [ref=e70]:
+      - generic [ref=e72]:
+        - generic [ref=e73]:
+          - generic [ref=e74]:
+            - img [ref=e75]
+            - heading "System Configuration" [level=1] [ref=e78]
+          - button [disabled] [ref=e79]:
+            - img [ref=e80]
+        - generic [ref=e86]:
+          - button "Connection" [ref=e87]:
+            - img [ref=e88]
+            - generic [ref=e92]: Connection
+          - button "Providers" [ref=e93]:
+            - img [ref=e94]
+            - generic [ref=e97]: Providers
+          - button "Appearance" [ref=e98]:
+            - img [ref=e99]
+            - generic [ref=e103]: Appearance
+        - generic [ref=e105]:
+          - generic [ref=e106]:
+            - generic [ref=e107]: API Connection
+            - img [ref=e110]
+          - generic [ref=e114]:
+            - generic [ref=e115]:
+              - generic [ref=e116]:
+                - img [ref=e117]
+                - generic [ref=e119]: Checking controller connection…
+              - paragraph [ref=e120]: Configure the API connection above and click Test or Retry to load system details.
+            - button "Retry" [disabled] [ref=e121]
+  - button "Open Next.js Dev Tools" [ref=e127] [cursor=pointer]:
+    - img [ref=e128]
+  - alert [ref=e131]

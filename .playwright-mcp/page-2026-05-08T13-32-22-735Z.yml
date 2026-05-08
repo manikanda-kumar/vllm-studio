@@ -1,0 +1,76 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "vLLM Studio" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e18]: vLLM Studio
+      - navigation [ref=e19]:
+        - button "Search sessions ⌘K" [ref=e20]:
+          - img [ref=e21]
+          - generic [ref=e24]: Search sessions
+          - generic [ref=e25]: ⌘K
+        - generic [ref=e26]: Workspace
+        - link "Agent" [ref=e27] [cursor=pointer]:
+          - /url: /agent
+          - img [ref=e28]
+          - generic [ref=e31]: Agent
+        - link "Settings" [ref=e32] [cursor=pointer]:
+          - /url: /configs
+          - img [ref=e33]
+          - generic [ref=e36]: Settings
+        - generic [ref=e37]:
+          - generic [ref=e38]: Projects
+          - button "Add project" [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e42]: Add project
+          - generic [ref=e44]:
+            - button "clicky" [ref=e45]:
+              - img [ref=e46]
+              - img [ref=e48]
+              - generic [ref=e50]: clicky
+            - button "Remove project" [ref=e51]:
+              - img [ref=e52]
+      - generic [ref=e55]:
+        - button "Collapse sidebar" [ref=e56]:
+          - img [ref=e57]
+        - button "Light mode" [ref=e61]:
+          - img [ref=e62]
+        - generic "offline" [ref=e68]
+    - main [ref=e70]:
+      - generic [ref=e190]:
+        - button "Show computer" [ref=e191]:
+          - img [ref=e192]
+        - generic [ref=e197]:
+          - generic [ref=e200]:
+            - heading "What should we work on in clicky?" [level=1] [ref=e201]
+            - paragraph [ref=e202]: Ask the agent to edit, inspect, or run something. Tab to queue · paste/drop files.
+          - generic [ref=e203]:
+            - generic [ref=e204]:
+              - 'textbox "Ask AI21: Jamba Large 1.7 (Enter) · queue with Tab · paste/drop files" [ref=e205]'
+              - generic [ref=e206]:
+                - button "Attach files" [ref=e207]:
+                  - img [ref=e208]
+                - 'button "Browser tool: OFF — click to let the agent navigate, click, fill, and read pages" [ref=e210]':
+                  - img [ref=e211]
+                - combobox "Session directory" [ref=e215]:
+                  - option "/Users/manik/Github/clicky" [selected]
+                - generic [ref=e216]:
+                  - img [ref=e217]
+                  - generic [ref=e219]: main
+                - generic [ref=e220]:
+                  - generic [ref=e221]: "+19"
+                  - generic [ref=e222]: "-0"
+                  - generic [ref=e223]: · 5 files
+                - 'button "AI21: Jamba Large 1.7" [ref=e225]':
+                  - generic [ref=e226]: "AI21: Jamba Large 1.7"
+                  - img [ref=e227]
+                - button "Send" [disabled] [ref=e230]:
+                  - img [ref=e231]
+            - generic [ref=e233]:
+              - generic [ref=e234]: R 0
+              - generic [ref=e235]: W 0
+              - generic [ref=e236]: 0/128.0K
+  - button "Open Next.js Dev Tools" [ref=e127] [cursor=pointer]:
+    - img [ref=e128]
+  - alert [ref=e131]

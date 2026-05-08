@@ -1,0 +1,134 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "vLLM Studio" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img [ref=e5]
+        - generic [ref=e18]: vLLM Studio
+      - navigation [ref=e19]:
+        - button "Search sessions ⌘K" [ref=e20]:
+          - img [ref=e21]
+          - generic [ref=e24]: Search sessions
+          - generic [ref=e25]: ⌘K
+        - generic [ref=e26]: Workspace
+        - link "Agent" [ref=e27] [cursor=pointer]:
+          - /url: /agent
+          - img [ref=e28]
+          - generic [ref=e31]: Agent
+        - link "Settings" [ref=e32] [cursor=pointer]:
+          - /url: /configs
+          - img [ref=e33]
+          - generic [ref=e36]: Settings
+        - generic [ref=e37]:
+          - generic [ref=e38]: Projects
+          - button "Add project" [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e42]: Add project
+          - generic [ref=e44]:
+            - button "clicky" [ref=e45]:
+              - img [ref=e46]
+              - img [ref=e48]
+              - generic [ref=e50]: clicky
+            - button "Remove project" [ref=e51]:
+              - img [ref=e52]
+      - generic [ref=e55]:
+        - button "Collapse sidebar" [ref=e56]:
+          - img [ref=e57]
+        - button "Light mode" [ref=e61]:
+          - img [ref=e62]
+        - generic "offline" [ref=e68]
+    - main [ref=e70]:
+      - generic [ref=e72]:
+        - generic [ref=e73]:
+          - button "Hide computer" [active] [pressed] [ref=e137]:
+            - img [ref=e75]
+          - generic [ref=e80]:
+            - generic [ref=e83]:
+              - heading "What should we work on in clicky?" [level=1] [ref=e124]
+              - paragraph [ref=e85]: Ask the agent to edit, inspect, or run something. Tab to queue · paste/drop files.
+            - generic [ref=e86]:
+              - generic [ref=e87]:
+                - 'textbox "Ask OpenAI: GPT-4o (Enter) · queue with Tab · paste/drop files" [ref=e125]'
+                - generic [ref=e89]:
+                  - button "Attach files" [ref=e90]:
+                    - img [ref=e91]
+                  - 'button "Browser tool: OFF — click to let the agent navigate, click, fill, and read pages" [ref=e93]':
+                    - img [ref=e94]
+                  - combobox "Session directory" [ref=e127]:
+                    - option "/Users/manik/Github/clicky" [selected]
+                  - generic [ref=e128]:
+                    - img [ref=e129]
+                    - generic [ref=e131]: main
+                  - generic [ref=e132]:
+                    - generic [ref=e133]: "+19"
+                    - generic [ref=e134]: "-0"
+                    - generic [ref=e135]: · 5 files
+                  - 'button "OpenAI: GPT-4o" [ref=e136]':
+                    - generic [ref=e99]: "OpenAI: GPT-4o"
+                    - img [ref=e100]
+                  - button "Send" [disabled] [ref=e103]:
+                    - img [ref=e104]
+              - generic [ref=e106]:
+                - generic [ref=e107]: R 0
+                - generic [ref=e108]: W 0
+                - generic [ref=e109]: 0/128.0K
+        - complementary [ref=e138]:
+          - separator "Resize computer" [ref=e139]
+          - generic [ref=e140]:
+            - 'generic "Computer follows focused session: New session" [ref=e141]': New session
+            - button "Browser" [ref=e142]
+            - button "Files" [ref=e143]
+            - button "Diff" [ref=e144]
+            - button "Mobile" [ref=e145]
+            - button "Close computer" [ref=e146]:
+              - img [ref=e147]
+          - generic [ref=e149]:
+            - generic [ref=e150]:
+              - button "Back" [disabled] [ref=e151]:
+                - img [ref=e152]
+              - button "Forward" [disabled] [ref=e154]:
+                - img [ref=e155]
+              - button "Reload" [ref=e157]:
+                - img [ref=e158]
+              - textbox "Browser address" [ref=e160]:
+                - /placeholder: Search or enter URL
+                - text: https://www.google.com
+              - button "Reader" [ref=e161]
+              - button "Close browser" [ref=e162]:
+                - img [ref=e163]
+            - generic [ref=e167]:
+              - generic [ref=e168]: https://www.google.com/
+              - heading "Google" [level=1] [ref=e169]
+              - article [ref=e170]:
+                - button "About" [ref=e171]
+                - button "Store" [ref=e172]
+                - button "Gmail" [ref=e173]
+                - button "Images" [ref=e174]
+                - text: https://www.google.co.in/intl/en/about/products
+                - button "Sign in" [ref=e175]
+                - text: "Upload image Upload file AI Mode See more Delete Delete Report inappropriate predictions Google offered in:"
+                - button "हिन्दी" [ref=e176]
+                - button "বাংলা" [ref=e177]
+                - button "తెలుగు" [ref=e178]
+                - button "मराठी" [ref=e179]
+                - button "தமிழ்" [ref=e180]
+                - button "ગુજરાતી" [ref=e181]
+                - button "ಕನ್ನಡ" [ref=e182]
+                - button "മലയാളം" [ref=e183]
+                - button "ਪੰਜਾਬੀ" [ref=e184]
+                - text: India
+                - button "Advertising" [ref=e185]
+                - button "Business" [ref=e186]
+                - button "How Search works" [ref=e187]
+                - button "Privacy" [ref=e188]
+                - button "Terms" [ref=e189]
+                - text: Settings
+                - button "Search settings" [ref=e190]
+                - button "Advanced search" [ref=e191]
+                - button "Your data in Search" [ref=e192]
+                - button "Search history" [ref=e193]
+                - button "Search help" [ref=e194]
+                - text: "Send feedback Dark theme: Off Google apps"
+  - button "Open Next.js Dev Tools" [ref=e119] [cursor=pointer]:
+    - img [ref=e120]
+  - alert [ref=e123]

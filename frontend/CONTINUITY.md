@@ -1,17 +1,20 @@
 # Continuity Ledger
 
 ## Goal
+
 Cross-platform mobile device integration for vLLM Studio using mobile-mcp (MCP SSE transport). Must work on Mac and Windows without PATH dependency issues.
 
 **Success criteria**: Mobile panel lists devices and captures screenshots via mobile-mcp on both platforms.
 
 ## Constraints/Assumptions
-- mobile-mcp uses MCP SSE transport (bidirectional, not simple HTTP)
+
+- mobile-mcp uses **stdio** MCP transport (simpler than SSE, works cross-platform)
 - Requires @modelcontextprotocol/sdk for proper client implementation
 - Current mobilecli approach has PATH issues in Electron (fixed temporarily)
-- mobile-mcp package: `@mobilenext/mobile-mcp`
+- mobile-mcp package: `@mobilenext/mobile-mcp@0.0.54` (pinned)
 
 ## Key Decisions
+
 - Pursue MCP SSE integration despite complexity (cross-platform benefit)
 - Phased approach: temporary mobilecli fix → full MCP SSE client
 - Keep pi-runtime extension architecture, change backend from HTTP routes to MCP
@@ -19,35 +22,85 @@ Cross-platform mobile device integration for vLLM Studio using mobile-mcp (MCP S
 ## State
 
 ### Done
+
 - Fixed Electron PATH issue in app-server.ts (adds /opt/homebrew/bin)
 - Fixed hook jq "Argument list too long" error (use stdin instead of --argjson)
-- Created mobile-mcp.ts client skeleton
-- Updated API routes to use mobile-mcp client (devices, screenshot, tap, button)
-- Tested mobile-mcp SSE server starts correctly on port 3456
+- Installed `@modelcontextprotocol/sdk` and `@mobilenext/mobile-mcp@0.0.54`
+- Probed mobile-mcp capabilities over stdio (see Capability Matrix below)
 
 ### Now
-- MCP SSE protocol requires bidirectional connection, not simple POST
-- Need to implement proper MCP client using @modelcontextprotocol/sdk
+
+- Rewrite mobile-mcp.ts with stdio-based MCP client (StdioClientTransport)
+- Implement cross-platform spawn helper to eliminate hardcoded paths
 
 ### Next
-1. Add @modelcontextprotocol/sdk dependency
-2. Implement MCP SSE client transport in mobile-mcp.ts
-3. Test device listing via MCP protocol
-4. Update screenshot/tap/button to use MCP tools
-5. Rebuild DMG and test on Electron
 
-## Open Questions
-- Does mobile-mcp support stdio mode as alternative to SSE? (simpler)
-- MCP SSE endpoint format: /sse GET → endpoint event → POST to that URL?
+1. Rewrite mobile-mcp.ts with proper MCP SDK Client + StdioClientTransport
+2. Add singleton on globalThis with start-lock and reconnect logic
+3. Migrate API routes (devices, screenshot, tap, button) to new client
+4. Add health/diagnostics route and UI banners
+5. Package pi-extensions as compiled JS for Electron
+6. Implement graceful shutdown for mobile-mcp child process
 
 ## Working Set
-- `/Users/manik/Github/vllm-studio/frontend/src/lib/mobile-mcp.ts` - MCP client (needs SDK)
+
+- `/Users/manik/Github/vllm-studio/frontend/src/lib/mobile-mcp.ts` - MCP client (rewrite in progress)
+- `/Users/manik/Github/vllm-studio/frontend/src/lib/system/spawn.ts` - new cross-platform spawn helper
 - `/Users/manik/Github/vllm-studio/frontend/src/app/api/agent/mobile/*/route.ts` - API routes
 - `/Users/manik/Github/vllm-studio/frontend/desktop/logic/app-server.ts` - PATH fix applied
 - `/Users/manik/.claude/hooks/stop_hook.sh` - jq fix applied
 
 ## Project Learnings
-- Electron on macOS doesn't inherit shell PATH - must add /opt/homebrew/bin explicitly
+
+- Electron on macOS doesn't inherit shell PATH - must add well-known dirs explicitly
 - jq --argjson fails with large args - use `jq -s` with process substitution instead
-- MCP SSE transport is bidirectional: GET /sse for events, POST to endpoint from event
-- mobile-mcp listens on /mcp but needs SSE handshake first
+- mobile-mcp supports **stdio** transport natively; no need for SSE/HTTP on port 3456
+- MCP SDK `Client` + `StdioClientTransport` is the correct integration pattern
+- Node >= 22 required (verified with v25.9.0)
+
+---
+
+## Capability Matrix
+
+**Source**: `@mobilenext/mobile-mcp@0.0.54` probed over stdio on 2026-05-08.
+**Node version**: v25.9.0 (requirement: >= 22).
+
+### Tools Available
+
+| MCP Tool Name                                | Maps to Route                  | Status    |
+| -------------------------------------------- | ------------------------------ | --------- |
+| `mobile_list_available_devices`              | `/api/agent/mobile/devices`    | Migrate   |
+| `mobile_take_screenshot`                     | `/api/agent/mobile/screenshot` | Migrate   |
+| `mobile_click_on_screen_at_coordinates`      | `/api/agent/mobile/tap`        | Migrate   |
+| `mobile_press_button`                        | `/api/agent/mobile/button`     | Migrate   |
+| `mobile_type_keys`                           | Future (typeText)              | Available |
+| `mobile_get_screen_size`                     | Future (getScreenSize)         | Available |
+| `mobile_list_elements_on_screen`             | Future (listElements)          | Available |
+| `mobile_list_apps`                           | —                              | Available |
+| `mobile_launch_app`                          | —                              | Available |
+| `mobile_terminate_app`                       | —                              | Available |
+| `mobile_install_app`                         | —                              | Available |
+| `mobile_uninstall_app`                       | —                              | Available |
+| `mobile_double_tap_on_screen`                | —                              | Available |
+| `mobile_long_press_on_screen_at_coordinates` | —                              | Available |
+| `mobile_open_url`                            | —                              | Available |
+| `mobile_swipe_on_screen`                     | —                              | Available |
+| `mobile_save_screenshot`                     | —                              | Available |
+| `mobile_set_orientation`                     | —                              | Available |
+| `mobile_get_orientation`                     | —                              | Available |
+| `mobile_start_screen_recording`              | —                              | Available |
+| `mobile_stop_screen_recording`               | —                              | Available |
+| `mobile_list_crashes`                        | —                              | Available |
+| `mobile_get_crash`                           | —                              | Available |
+
+### Tools NOT Available
+
+| Desired Capability | Reason                         | Current Workaround                                               |
+| ------------------ | ------------------------------ | ---------------------------------------------------------------- |
+| Boot device        | No `mobile_boot_device` tool   | `mobilecli` via `/api/agent/mobile/boot`                         |
+| Stream logs        | No `mobile_stream_logs` tool   | `adb logcat` / `xcrun simctl spawn` via `/api/agent/mobile/logs` |
+| Screen stream      | No `mobile_stream_screen` tool | `serve-sim` via `/api/agent/mobile/stream/*`                     |
+
+### Resources
+
+- `listResources()` returns **Method not found** — no resources exposed by this MCP server.
