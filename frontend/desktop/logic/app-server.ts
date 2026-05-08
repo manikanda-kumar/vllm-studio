@@ -151,15 +151,19 @@ export async function stopFrontendServer(handle?: ServerHandle): Promise<void> {
   child.kill("SIGTERM");
 
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      if (!child.killed) child.kill("SIGKILL");
-      resolve();
-    }, 5_000);
+    let exited = false;
 
     child.once("exit", () => {
-      clearTimeout(timer);
+      exited = true;
       resolve();
     });
+
+    setTimeout(() => {
+      if (!exited) {
+        child.kill("SIGKILL");
+      }
+      resolve();
+    }, 5_000);
   });
 }
 

@@ -1,4 +1,7 @@
 import { resolveExecutable } from "@/lib/system/spawn";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,10 +11,30 @@ function nodeVersionOk(): boolean {
   return major >= 22;
 }
 
+function resolveLocalMobileMcp(): boolean {
+  try {
+    const req = createRequire(path.join(process.cwd(), "package.json"));
+    req.resolve("@mobilenext/mobile-mcp/lib/index.js");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function canLaunchMobileMcp(): boolean {
+  // Must have Node 22+ for MCP SDK
+  if (!nodeVersionOk()) return false;
+
   const envOverride = process.env.VLLM_STUDIO_MOBILE_MCP_BIN;
-  if (envOverride) return true;
-  // Check if npx is available so we can launch the pinned version
+  if (envOverride) {
+    // Verify env override path actually exists
+    return existsSync(envOverride);
+  }
+
+  // Check locally installed package first
+  if (resolveLocalMobileMcp()) return true;
+
+  // Fall back to npx
   return Boolean(resolveExecutable(process.platform === "win32" ? "npx.cmd" : "npx"));
 }
 
