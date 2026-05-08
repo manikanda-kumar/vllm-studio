@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getMobileMcpClient, startMobileMcp } from "@/lib/mobile-mcp";
+import { getMobileMcpClient } from "@/lib/mobile-mcp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +17,16 @@ const VALID_BUTTONS = new Set([
   "DPAD_RIGHT",
   "DPAD_CENTER",
 ]);
+
+function isTransportNotReady(message: string): boolean {
+  return (
+    message.includes("ENOENT") ||
+    message.includes("not found") ||
+    message.includes("not ready") ||
+    message.includes("startup timeout") ||
+    message.includes("failed to initialize")
+  );
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,21 +47,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await startMobileMcp();
     const client = getMobileMcpClient();
+    await client.ensureReady();
     const result = await client.pressButton(deviceId, button);
 
     if (result.isError) {
       const textContent = result.content.find((c) => c.type === "text");
-      const errorMsg = textContent && textContent.type === "text" ? textContent.text : "Button press failed";
+      const errorMsg =
+        textContent && textContent.type === "text" ? textContent.text : "Button press failed";
       return Response.json({ error: errorMsg }, { status: 500 });
     }
 
     return Response.json({ success: true, button });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Button press failed" },
-      { status: 500 },
-    );
+    const message = error instanceof Error ? error.message : "Button press failed";
+    if (isTransportNotReady(message)) {
+      return Response.json(
+        {
+          error: message,
+          code: "mobile_mcp_unavailable",
+          health: getMobileMcpClient().getHealth(),
+        },
+        { status: 503 },
+      );
+    }
+    return Response.json({ error: message }, { status: 500 });
   }
 }

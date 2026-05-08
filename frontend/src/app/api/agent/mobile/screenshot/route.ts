@@ -1,8 +1,18 @@
 import { NextRequest } from "next/server";
-import { getMobileMcpClient, startMobileMcp } from "@/lib/mobile-mcp";
+import { getMobileMcpClient } from "@/lib/mobile-mcp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function isTransportNotReady(message: string): boolean {
+  return (
+    message.includes("ENOENT") ||
+    message.includes("not found") ||
+    message.includes("not ready") ||
+    message.includes("startup timeout") ||
+    message.includes("failed to initialize")
+  );
+}
 
 export async function GET(request: NextRequest) {
   const deviceId = request.nextUrl.searchParams.get("device")?.trim();
@@ -11,11 +21,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    await startMobileMcp();
     const client = getMobileMcpClient();
+    await client.ensureReady();
     const result = await client.takeScreenshot(deviceId);
 
-    // Find image content in MCP result
     const imageContent = result.content.find((c) => c.type === "image");
     if (imageContent && imageContent.type === "image") {
       const buffer = Buffer.from(imageContent.data, "base64");
@@ -27,7 +36,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Fallback: check if text contains base64 image
     const textContent = result.content.find((c) => c.type === "text");
     if (textContent && textContent.type === "text") {
       const parsed = JSON.parse(textContent.text) as { image?: string; base64?: string };
@@ -45,9 +53,17 @@ export async function GET(request: NextRequest) {
 
     return Response.json({ error: "No image in response" }, { status: 500 });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Screenshot failed" },
-      { status: 500 },
-    );
+    const message = error instanceof Error ? error.message : "Screenshot failed";
+    if (isTransportNotReady(message)) {
+      return Response.json(
+        {
+          error: message,
+          code: "mobile_mcp_unavailable",
+          health: getMobileMcpClient().getHealth(),
+        },
+        { status: 503 },
+      );
+    }
+    return Response.json({ error: message }, { status: 500 });
   }
 }

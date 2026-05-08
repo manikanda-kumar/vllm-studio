@@ -1,4 +1,4 @@
-import { getMobileMcpClient, startMobileMcp } from "@/lib/mobile-mcp";
+import { getMobileMcpClient } from "@/lib/mobile-mcp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,21 +11,27 @@ type MobileDevice = {
   state: "online" | "offline";
 };
 
+function isTransportNotReady(message: string): boolean {
+  return (
+    message.includes("ENOENT") ||
+    message.includes("not found") ||
+    message.includes("not ready") ||
+    message.includes("startup timeout") ||
+    message.includes("failed to initialize")
+  );
+}
+
 export async function GET() {
   try {
-    // Ensure mobile-mcp is running
-    await startMobileMcp();
     const client = getMobileMcpClient();
-
+    await client.ensureReady();
     const result = await client.listDevices();
 
-    // Parse MCP tool result - content is array of text/image items
     const textContent = result.content.find((c) => c.type === "text");
     if (!textContent || textContent.type !== "text") {
       return Response.json({ devices: [] });
     }
 
-    // Parse the JSON from the text response
     const parsed = JSON.parse(textContent.text) as {
       devices?: Array<{
         id?: string;
@@ -38,7 +44,6 @@ export async function GET() {
       }>;
     };
 
-    // Normalize device format
     const devices: MobileDevice[] = (parsed.devices ?? []).map((d) => ({
       id: d.id ?? d.udid ?? "",
       name: d.name ?? "Unknown",
@@ -52,13 +57,16 @@ export async function GET() {
     return Response.json({ devices });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to list devices";
-    const isMissing =
-      message.includes("ENOENT") ||
-      message.includes("not found") ||
-      message.includes("not ready") ||
-      message.includes("startup timeout");
-    if (isMissing) {
-      return Response.json({ devices: [], unavailable: true });
+    if (isTransportNotReady(message)) {
+      return Response.json(
+        {
+          error: message,
+          code: "mobile_mcp_unavailable",
+          health: getMobileMcpClient().getHealth(),
+          devices: [],
+        },
+        { status: 503 },
+      );
     }
     return Response.json({ error: message, devices: [] }, { status: 500 });
   }
