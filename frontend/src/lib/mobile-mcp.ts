@@ -1,185 +1,187 @@
 // Mobile MCP client for vLLM Studio.
-// Manages mobile-mcp server process and provides typed API for mobile device tools.
+// Uses stdio-based MCP transport via @modelcontextprotocol/sdk.
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import path from "node:path";
+import os from "node:os";
 
-const DEFAULT_PORT = 3456;
-const STARTUP_TIMEOUT_MS = 10000;
-
-type MobileMcpConfig = {
-  port?: number;
-};
-
-type JsonRpcRequest = {
-  jsonrpc: "2.0";
-  method: string;
-  params?: Record<string, unknown>;
-  id: number;
-};
-
-type JsonRpcResponse = {
-  jsonrpc: "2.0";
-  result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
-  id: number;
-};
+const PINNED_VERSION = "0.0.54";
 
 type McpToolResult = {
-  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
+  content: Array<
+    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+  >;
   isError?: boolean;
 };
 
-class MobileMcpClient extends EventEmitter {
-  private process: ChildProcess | null = null;
-  private port: number;
-  private baseUrl: string;
-  private requestId = 0;
-  private ready = false;
+type HealthStatus = {
+  ready: boolean;
+  lastError: string | null;
+  version: string | null;
+  toolCount: number;
+};
 
-  constructor(config: MobileMcpConfig = {}) {
-    super();
-    this.port = config.port ?? DEFAULT_PORT;
-    this.baseUrl = `http://127.0.0.1:${this.port}`;
+function enhancedPath(): string {
+  const platform = os.platform();
+  const extraDirs: string[] = [];
+  if (platform === "darwin") {
+    extraDirs.push("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin");
+  } else if (platform === "linux") {
+    extraDirs.push("/usr/local/bin", "/usr/bin");
+  } else if (platform === "win32") {
+    if (process.env.APPDATA) extraDirs.push(path.join(process.env.APPDATA, "npm"));
+    if (process.env.ProgramFiles) extraDirs.push(path.join(process.env.ProgramFiles, "nodejs"));
+  }
+  return [...extraDirs, process.env.PATH].filter(Boolean).join(path.delimiter);
+}
+
+function npxLauncher(): string {
+  return os.platform() === "win32" ? "npx.cmd" : "npx";
+}
+
+function resolveMobileMcpCommand(): { command: string; args: string[] } {
+  const envOverride = process.env.VLLM_STUDIO_MOBILE_MCP_BIN;
+  if (envOverride) {
+    return { command: envOverride, args: [] };
+  }
+  return {
+    command: npxLauncher(),
+    args: ["-y", `@mobilenext/mobile-mcp@${PINNED_VERSION}`],
+  };
+}
+
+class MobileMcpClient {
+  private transport: StdioClientTransport | null = null;
+  private client: Client | null = null;
+  private ready = false;
+  private starting: Promise<void> | null = null;
+  private lastError: string | null = null;
+  private toolCount = 0;
+
+  getHealth(): HealthStatus {
+    return {
+      ready: this.ready,
+      lastError: this.lastError,
+      version: this.ready ? PINNED_VERSION : null,
+      toolCount: this.toolCount,
+    };
   }
 
-  async start(): Promise<void> {
-    if (this.process && !this.process.killed) {
-      return; // Already running
+  async ensureReady(): Promise<Client> {
+    if (this.ready && this.client) {
+      return this.client;
     }
 
-    // Check if mobile-mcp is already running on port
-    try {
-      const response = await fetch(`${this.baseUrl}/mcp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", params: {}, id: 0 }),
-      });
-      if (response.ok) {
-        this.ready = true;
-        return; // Already running externally
+    if (this.starting) {
+      await this.starting;
+      if (!this.client) {
+        throw new Error("mobile-mcp failed to initialize");
       }
-    } catch {
-      // Not running, start it
+      return this.client;
     }
 
-    return new Promise((resolve, reject) => {
-      const args = ["-y", "@mobilenext/mobile-mcp@latest", "--listen", String(this.port)];
+    this.starting = this.doStart();
+    try {
+      await this.starting;
+    } finally {
+      this.starting = null;
+    }
 
-      this.process = spawn("npx", args, {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: {
-          ...process.env,
-          PATH: ["/opt/homebrew/bin", "/usr/local/bin", process.env.PATH].filter(Boolean).join(":"),
-        },
-      });
+    if (!this.client) {
+      throw new Error("mobile-mcp failed to initialize");
+    }
+    return this.client;
+  }
 
-      let startupError = "";
+  private async doStart(): Promise<void> {
+    this.lastError = null;
+    const { command, args } = resolveMobileMcpCommand();
 
-      this.process.stderr?.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        startupError += text;
-        // Check for ready signal
-        if (text.includes("listening") || text.includes("ready") || text.includes(String(this.port))) {
-          this.ready = true;
-        }
-      });
-
-      this.process.stdout?.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        if (text.includes("listening") || text.includes("ready")) {
-          this.ready = true;
-        }
-      });
-
-      this.process.on("error", (err) => {
-        reject(new Error(`Failed to start mobile-mcp: ${err.message}`));
-      });
-
-      this.process.on("exit", (code) => {
-        this.ready = false;
-        this.emit("exit", code);
-      });
-
-      // Wait for server to be ready
-      const checkReady = async () => {
-        const startTime = Date.now();
-        while (Date.now() - startTime < STARTUP_TIMEOUT_MS) {
-          try {
-            const response = await fetch(`${this.baseUrl}/mcp`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", params: {}, id: 0 }),
-            });
-            if (response.ok) {
-              this.ready = true;
-              resolve();
-              return;
-            }
-          } catch {
-            // Keep trying
-          }
-          await new Promise((r) => setTimeout(r, 200));
-        }
-        reject(new Error(`mobile-mcp startup timeout. stderr: ${startupError}`));
-      };
-
-      void checkReady();
+    const transport = new StdioClientTransport({
+      command,
+      args,
+      env: {
+        ...process.env,
+        PATH: enhancedPath(),
+      },
+      stderr: "pipe",
     });
+
+    transport.onclose = () => {
+      this.ready = false;
+      this.transport = null;
+      this.client = null;
+    };
+
+    transport.onerror = (err) => {
+      this.lastError = err.message;
+    };
+
+    const client = new Client({ name: "vllm-studio-mobile", version: "0.2.1" });
+
+    try {
+      await client.connect(transport);
+      const toolsResult = await client.listTools();
+      this.toolCount = toolsResult.tools.length;
+      this.transport = transport;
+      this.client = client;
+      this.ready = true;
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      try {
+        await transport.close();
+      } catch {
+        // ignore cleanup error
+      }
+      throw err;
+    }
   }
 
   async stop(): Promise<void> {
-    if (this.process && !this.process.killed) {
-      this.process.kill("SIGTERM");
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          if (this.process && !this.process.killed) {
-            this.process.kill("SIGKILL");
-          }
-          resolve();
-        }, 5000);
-        this.process?.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      });
-    }
-    this.process = null;
     this.ready = false;
-  }
-
-  isReady(): boolean {
-    return this.ready;
+    this.toolCount = 0;
+    if (this.client) {
+      try {
+        await this.client.close();
+      } catch {
+        // ignore cleanup error
+      }
+      this.client = null;
+    }
+    if (this.transport) {
+      try {
+        await this.transport.close();
+      } catch {
+        // ignore cleanup error
+      }
+      this.transport = null;
+    }
   }
 
   private async callTool(name: string, args: Record<string, unknown> = {}): Promise<McpToolResult> {
-    if (!this.ready) {
-      throw new Error("mobile-mcp not ready");
+    const client = await this.ensureReady();
+    const result = await client.callTool({ name, arguments: args });
+
+    if ("toolResult" in result) {
+      return { content: [{ type: "text", text: JSON.stringify(result.toolResult) }] };
     }
 
-    const request: JsonRpcRequest = {
-      jsonrpc: "2.0",
-      method: "tools/call",
-      params: { name, arguments: args },
-      id: ++this.requestId,
+    const content = result.content
+      .map((c: { type: string; text?: string; data?: string; mimeType?: string }) => {
+        if (c.type === "text" && c.text !== undefined) {
+          return { type: "text" as const, text: c.text };
+        }
+        if (c.type === "image" && c.data !== undefined && c.mimeType !== undefined) {
+          return { type: "image" as const, data: c.data, mimeType: c.mimeType };
+        }
+        return null;
+      })
+      .filter(Boolean) as McpToolResult["content"];
+    return {
+      content,
+      isError: typeof result.isError === "boolean" ? result.isError : undefined,
     };
-
-    const response = await fetch(`${this.baseUrl}/mcp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      throw new Error(`mobile-mcp HTTP ${response.status}: ${await response.text()}`);
-    }
-
-    const json = (await response.json()) as JsonRpcResponse;
-    if (json.error) {
-      throw new Error(`mobile-mcp error: ${json.error.message}`);
-    }
-
-    return json.result as McpToolResult;
   }
 
   async listDevices(): Promise<McpToolResult> {
@@ -195,7 +197,6 @@ class MobileMcpClient extends EventEmitter {
   }
 
   async pressButton(deviceId: string, button: string): Promise<McpToolResult> {
-    // Map button names to mobile-mcp format
     const buttonMap: Record<string, string> = {
       home: "HOME",
       back: "BACK",
@@ -204,7 +205,8 @@ class MobileMcpClient extends EventEmitter {
       volume_up: "VOLUME_UP",
       volume_down: "VOLUME_DOWN",
     };
-    return this.callTool("mobile_press_button", { deviceId, button: buttonMap[button.toLowerCase()] || button });
+    const mapped = buttonMap[button.toLowerCase()] || button;
+    return this.callTool("mobile_press_button", { deviceId, button: mapped });
   }
 
   async typeText(deviceId: string, text: string): Promise<McpToolResult> {
@@ -220,26 +222,29 @@ class MobileMcpClient extends EventEmitter {
   }
 }
 
-// Singleton instance
-let client: MobileMcpClient | null = null;
+const globalForMobile = globalThis as typeof globalThis & {
+  __vllmStudioMobileMcpClient?: MobileMcpClient;
+};
+
+function getClient(): MobileMcpClient {
+  if (!globalForMobile.__vllmStudioMobileMcpClient) {
+    globalForMobile.__vllmStudioMobileMcpClient = new MobileMcpClient();
+  }
+  return globalForMobile.__vllmStudioMobileMcpClient;
+}
 
 export function getMobileMcpClient(): MobileMcpClient {
-  if (!client) {
-    client = new MobileMcpClient();
-  }
-  return client;
+  return getClient();
 }
 
 export async function startMobileMcp(): Promise<void> {
-  const c = getMobileMcpClient();
-  await c.start();
+  await getClient().ensureReady();
 }
 
 export async function stopMobileMcp(): Promise<void> {
-  if (client) {
-    await client.stop();
-    client = null;
-  }
+  await getClient().stop();
+  globalForMobile.__vllmStudioMobileMcpClient = undefined;
 }
 
 export { MobileMcpClient };
+export type { McpToolResult, HealthStatus };

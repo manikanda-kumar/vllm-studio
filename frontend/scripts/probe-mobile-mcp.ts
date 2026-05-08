@@ -33,7 +33,7 @@ async function main() {
   const transport = new StdioClientTransport({
     command,
     args,
-    env: { ...process.env },
+    env: { ...process.env } as Record<string, string>,
   });
 
   const client = new Client({ name: "probe-mobile-mcp", version: "0.1.0" });
