@@ -75,6 +75,7 @@ export function MobilePanel({ cwd }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const frameSourceRef = useRef<EventSource | null>(null);
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logsRef = useRef<HTMLDivElement>(null);
 
@@ -130,13 +131,19 @@ export function MobilePanel({ cwd }: Props) {
     }
   }, [selectedDevice]);
 
-  // Start iOS streaming via serve-sim
+  // Start live frame streaming via SSE
   const startStream = useCallback(async () => {
     if (!selectedDevice) return;
     const selected = devices.find((d) => d.id === selectedDevice);
     if (!selected) return;
 
-    // Only iOS simulators use serve-sim streaming
+    // Close any existing frame source
+    if (frameSourceRef.current) {
+      frameSourceRef.current.close();
+      frameSourceRef.current = null;
+    }
+
+    // iOS simulators can optionally use serve-sim for touch WebSocket
     if (selected.platform === "ios" && selected.type === "simulator") {
       try {
         const response = await fetch("/api/agent/mobile/stream/start", {
@@ -145,32 +152,56 @@ export function MobilePanel({ cwd }: Props) {
           body: JSON.stringify({ device: selectedDevice }),
         });
         const payload = (await response.json()) as StreamInfo & { error?: string };
-        if (!response.ok || payload.error) {
-          throw new Error(payload.error || "Failed to start stream");
+        if (response.ok && !payload.error) {
+          setStreamInfo(payload);
+          // Connect WebSocket for touch control
+          const ws = new WebSocket(payload.wsUrl);
+          ws.binaryType = "arraybuffer";
+          wsRef.current = ws;
         }
-        setStreamInfo(payload);
-        setStreaming(true);
-
-        // Connect WebSocket for touch control
-        const ws = new WebSocket(payload.wsUrl);
-        ws.binaryType = "arraybuffer";
-        wsRef.current = ws;
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Stream failed");
-        // Fallback to auto-refresh mode
-        setAutoRefresh(true);
-        setStreaming(true);
+      } catch {
+        // serve-sim unavailable, continue with SSE frames only
       }
-    } else {
-      // Android/real devices: use auto-refresh mode
-      setAutoRefresh(true);
-      setStreaming(true);
     }
+
+    // Use SSE frame streaming for all devices
+    const es = new EventSource(
+      `/api/agent/mobile/frames?device=${encodeURIComponent(selectedDevice)}`,
+    );
+    frameSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as
+          | { type: "frame"; data: string; mimeType: string }
+          | { type: "error"; error: string };
+
+        if (data.type === "frame") {
+          setScreenshot(`data:${data.mimeType};base64,${data.data}`);
+          setError(null);
+        } else if (data.type === "error") {
+          setError(data.error);
+        }
+      } catch {
+        // Ignore parse errors (e.g., ping comments)
+      }
+    };
+
+    es.onerror = () => {
+      // EventSource will auto-reconnect, but mark error state
+      setError("Frame stream interrupted, reconnecting...");
+    };
+
+    setStreaming(true);
   }, [selectedDevice, devices]);
 
   const stopStream = useCallback(async () => {
     setStreaming(false);
     setAutoRefresh(false);
+    if (frameSourceRef.current) {
+      frameSourceRef.current.close();
+      frameSourceRef.current = null;
+    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -349,6 +380,7 @@ export function MobilePanel({ cwd }: Props) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (frameSourceRef.current) frameSourceRef.current.close();
       if (wsRef.current) wsRef.current.close();
       if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
     };
