@@ -102,6 +102,31 @@ function resolveBrowserExtensionPath(): string | null {
   return null;
 }
 
+// Locate the bundled mobile extension for device interaction tools.
+function resolveMobileExtensionPath(): string | null {
+  const candidates = [
+    process.env.VLLM_STUDIO_MOBILE_EXTENSION_PATH,
+    process.resourcesPath
+      ? path.join(process.resourcesPath, "desktop", "resources", "pi-extensions", "mobile.ts")
+      : null,
+    path.resolve(process.cwd(), "frontend", "desktop", "resources", "pi-extensions", "mobile.ts"),
+    path.resolve(process.cwd(), "desktop", "resources", "pi-extensions", "mobile.ts"),
+    path.resolve(
+      process.cwd(),
+      "..",
+      "frontend",
+      "desktop",
+      "resources",
+      "pi-extensions",
+      "mobile.ts",
+    ),
+  ].filter((value): value is string => Boolean(value));
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 function deriveFrontendBase(): string {
   const port = process.env.PORT || "3000";
   return `http://127.0.0.1:${port}`;
@@ -257,6 +282,10 @@ class PiRpcSession extends EventEmitter {
       const extensionPath = resolveBrowserExtensionPath();
       if (extensionPath) args.push("--extension", extensionPath);
     }
+
+    // Always load mobile extension if available - tools are no-ops without devices
+    const mobileExtensionPath = resolveMobileExtensionPath();
+    if (mobileExtensionPath) args.push("--extension", mobileExtensionPath);
 
     const child = spawn(piBinaryPath(), args, {
       cwd,

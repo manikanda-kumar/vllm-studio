@@ -16,6 +16,7 @@ export interface ApiConnectionSettings {
   backendUrl: string;
   apiKey: string;
   hasApiKey: boolean;
+  defaultModel: string;
   voiceUrl: string;
   voiceModel: string;
 }
@@ -28,6 +29,7 @@ const DEFAULT_API_SETTINGS: ApiConnectionSettings = {
   backendUrl: DEFAULT_BACKEND_URL,
   apiKey: "",
   hasApiKey: false,
+  defaultModel: "",
   voiceUrl: "",
   voiceModel: "whisper-large-v3-turbo",
 };
@@ -43,6 +45,7 @@ const mergeApiSettings = (
     backendUrl: localBackendUrl || server?.backendUrl || DEFAULT_API_SETTINGS.backendUrl,
     apiKey: localApiKey || server?.apiKey || "",
     hasApiKey: Boolean(localApiKey) || Boolean(server?.hasApiKey),
+    defaultModel: server?.defaultModel || DEFAULT_API_SETTINGS.defaultModel,
     voiceUrl: server?.voiceUrl || DEFAULT_API_SETTINGS.voiceUrl,
     voiceModel: server?.voiceModel || DEFAULT_API_SETTINGS.voiceModel,
   };
@@ -178,6 +181,7 @@ export function useConfigs() {
         body: JSON.stringify({
           backendUrl: apiSettings.backendUrl,
           apiKey: apiSettings.apiKey,
+          defaultModel: apiSettings.defaultModel,
           voiceUrl: apiSettings.voiceUrl,
           voiceModel: apiSettings.voiceModel,
         }),

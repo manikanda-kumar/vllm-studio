@@ -242,15 +242,26 @@ export function AgentWorkspace() {
       setLoadingModels(true);
       setError("");
       try {
-        const response = await fetch("/api/agent/models", { cache: "no-store" });
-        const payload = await safeJson<{ models?: AgentModel[]; error?: string }>(response);
-        if (!response.ok) throw new Error(payload.error || "Failed to load models");
+        const [modelsResponse, settingsResponse] = await Promise.all([
+          fetch("/api/agent/models", { cache: "no-store" }),
+          fetch("/api/settings", { cache: "no-store" }),
+        ]);
+        const payload = await safeJson<{ models?: AgentModel[]; error?: string }>(modelsResponse);
+        if (!modelsResponse.ok) throw new Error(payload.error || "Failed to load models");
         if (cancelled) return;
         const nextModels = payload.models ?? [];
         setModels(nextModels);
+
+        let defaultModel = "";
+        if (settingsResponse.ok) {
+          const settings = await safeJson<{ defaultModel?: string }>(settingsResponse);
+          defaultModel = settings.defaultModel || "";
+        }
+
         setSelectedModel(
           (current) =>
             (current && nextModels.some((model) => model.id === current) ? current : "") ||
+            (defaultModel && nextModels.some((model) => model.id === defaultModel) ? defaultModel : "") ||
             nextModels.find((model) => model.active)?.id ||
             nextModels[0]?.id ||
             "",
@@ -1409,7 +1420,9 @@ function ModelPicker({
   loading: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const active = models.find((model) => model.id === selectedModel) || null;
 
   useEffect(() => {
@@ -1424,6 +1437,21 @@ function ModelPicker({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
+  useEffect(() => {
+    if (open && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!filter.trim()) return models;
+    const query = filter.toLowerCase();
+    return models.filter(
+      (model) =>
+        model.id.toLowerCase().includes(query) || model.name.toLowerCase().includes(query),
+    );
+  }, [models, filter]);
+
   const triggerLabel = loading
     ? "Loading…"
     : active?.name || (models.length === 0 ? "No models" : "Select model");
@@ -1436,6 +1464,7 @@ function ModelPicker({
         onClick={() => {
           if (disabled) return;
           setOpen((value) => !value);
+          setFilter("");
         }}
         disabled={disabled}
         className="inline-flex !h-7 !min-h-7 !min-w-0 max-w-[140px] items-center gap-1.5 rounded-md border-0 bg-transparent px-2 !text-xs text-(--fg) hover:bg-(--surface) disabled:opacity-60"
@@ -1445,31 +1474,48 @@ function ModelPicker({
         <ChevronDownIcon className="h-3 w-3 shrink-0 text-(--dim)" />
       </button>
       {open ? (
-        <div className="absolute right-0 top-10 z-50 w-72 rounded-md border border-(--border) bg-(--surface) shadow-lg">
+        <div className="fixed right-4 bottom-20 z-[9999] w-80 rounded-md border border-(--border) bg-(--surface) shadow-lg">
+          <div className="border-b border-(--border) p-1.5">
+            <input
+              ref={inputRef}
+              type="text"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Filter models… (e.g. openai, claude)"
+              className="w-full rounded border border-(--border) bg-(--bg) px-2 py-1 text-xs text-(--fg) placeholder-(--dim) outline-none focus:border-(--accent)"
+            />
+          </div>
           <div className="max-h-72 overflow-y-auto p-1">
-            {models.map((model) => {
-              const isActive = model.id === selectedModel;
-              return (
-                <button
-                  key={model.id}
-                  type="button"
-                  onClick={() => {
-                    onSelect(model.id);
-                    setOpen(false);
-                  }}
-                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-(--bg) ${
-                    isActive ? "bg-(--bg)" : ""
-                  }`}
-                >
-                  <span className="min-w-0 flex-1 truncate text-left text-(--fg)">
-                    {model.name}
-                  </span>
-                  {model.reasoning ? (
-                    <span className="shrink-0 text-[10px] text-(--dim)">· reasoning</span>
-                  ) : null}
-                </button>
-              );
-            })}
+            {filtered.length === 0 ? (
+              <div className="px-2 py-3 text-center text-xs text-(--dim)">
+                No models match "{filter}"
+              </div>
+            ) : (
+              filtered.map((model) => {
+                const isActive = model.id === selectedModel;
+                return (
+                  <button
+                    key={model.id}
+                    type="button"
+                    onClick={() => {
+                      onSelect(model.id);
+                      setOpen(false);
+                      setFilter("");
+                    }}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-(--bg) ${
+                      isActive ? "bg-(--bg)" : ""
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-left text-(--fg)">
+                      {model.name}
+                    </span>
+                    {model.reasoning ? (
+                      <span className="shrink-0 text-[10px] text-(--dim)">· reasoning</span>
+                    ) : null}
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
       ) : null}

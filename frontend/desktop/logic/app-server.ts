@@ -84,11 +84,17 @@ export async function startFrontendServer(): Promise<ServerHandle> {
 
   log.info(`Starting embedded frontend server from ${serverScript} on ${url}`);
 
+  // Electron on macOS doesn't inherit shell PATH. Add common tool locations.
+  const extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
+  const currentPath = process.env.PATH || "";
+  const enhancedPath = [...extraPaths, currentPath].join(":");
+
   const child = fork(serverScript, {
     cwd: serverRoot,
     stdio: "pipe",
     env: {
       ...process.env,
+      PATH: enhancedPath,
       NODE_ENV: "production",
       PORT: String(port),
       HOSTNAME: "127.0.0.1",

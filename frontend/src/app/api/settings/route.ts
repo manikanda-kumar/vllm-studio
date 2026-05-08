@@ -10,6 +10,7 @@ export async function GET() {
       backendUrl: settings.backendUrl,
       apiKey: maskApiKey(settings.apiKey),
       hasApiKey: Boolean(settings.apiKey),
+      defaultModel: settings.defaultModel,
       voiceUrl: settings.voiceUrl,
       voiceModel: settings.voiceModel,
     });
@@ -24,7 +25,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { backendUrl, apiKey, voiceUrl, voiceModel } = body as Partial<ApiSettings>;
+    const { backendUrl, apiKey, defaultModel, voiceUrl, voiceModel } = body as Partial<ApiSettings>;
 
     // Validate URL
     if (backendUrl && !isValidUrl(backendUrl)) {
@@ -42,6 +43,7 @@ export async function POST(request: NextRequest) {
       backendUrl: backendUrl || current.backendUrl,
       // Only update API key if explicitly provided (not masked value)
       apiKey: apiKey && !apiKey.includes("••••") ? apiKey : current.apiKey,
+      defaultModel: defaultModel ?? current.defaultModel,
       voiceUrl: voiceUrl || current.voiceUrl,
       voiceModel: voiceModel || current.voiceModel,
     };
@@ -53,6 +55,7 @@ export async function POST(request: NextRequest) {
       backendUrl: newSettings.backendUrl,
       apiKey: maskApiKey(newSettings.apiKey),
       hasApiKey: Boolean(newSettings.apiKey),
+      defaultModel: newSettings.defaultModel,
       voiceUrl: newSettings.voiceUrl,
       voiceModel: newSettings.voiceModel,
     });

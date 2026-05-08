@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { getMobileMcpClient, startMobileMcp } from "@/lib/mobile-mcp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,39 +11,55 @@ type MobileDevice = {
   state: "online" | "offline";
 };
 
-function runMobileCli(args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("mobilecli", args, { stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve(stdout);
-      } else {
-        reject(new Error(stderr || `mobilecli exited with code ${code}`));
-      }
-    });
-    proc.on("error", (err) => {
-      reject(new Error(`Failed to run mobilecli: ${err.message}`));
-    });
-  });
-}
-
 export async function GET() {
   try {
-    const output = await runMobileCli(["devices", "--include-offline"]);
-    const devices = JSON.parse(output) as MobileDevice[];
+    // Ensure mobile-mcp is running
+    await startMobileMcp();
+    const client = getMobileMcpClient();
+
+    const result = await client.listDevices();
+
+    // Parse MCP tool result - content is array of text/image items
+    const textContent = result.content.find((c) => c.type === "text");
+    if (!textContent || textContent.type !== "text") {
+      return Response.json({ devices: [] });
+    }
+
+    // Parse the JSON from the text response
+    const parsed = JSON.parse(textContent.text) as {
+      devices?: Array<{
+        id?: string;
+        udid?: string;
+        name?: string;
+        platform?: string;
+        type?: string;
+        state?: string;
+        status?: string;
+      }>;
+    };
+
+    // Normalize device format
+    const devices: MobileDevice[] = (parsed.devices ?? []).map((d) => ({
+      id: d.id ?? d.udid ?? "",
+      name: d.name ?? "Unknown",
+      platform: (d.platform?.toLowerCase() === "ios" ? "ios" : "android") as "ios" | "android",
+      type: (d.type?.toLowerCase() ?? "emulator") as "real" | "emulator" | "simulator",
+      state: (d.state?.toLowerCase() === "online" || d.status?.toLowerCase() === "online"
+        ? "online"
+        : "offline") as "online" | "offline",
+    }));
+
     return Response.json({ devices });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Failed to list devices", devices: [] },
-      { status: 500 },
-    );
+    const message = error instanceof Error ? error.message : "Failed to list devices";
+    const isMissing =
+      message.includes("ENOENT") ||
+      message.includes("not found") ||
+      message.includes("not ready") ||
+      message.includes("startup timeout");
+    if (isMissing) {
+      return Response.json({ devices: [], unavailable: true });
+    }
+    return Response.json({ error: message, devices: [] }, { status: 500 });
   }
 }

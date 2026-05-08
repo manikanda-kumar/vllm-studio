@@ -10,9 +10,16 @@
 //   sanitizePublicBrowserUrl) so we never get tricked into SSRF.
 // - Strips scripts/styles/iframes from the HTML before extracting text.
 // - Caps response size to 512KB to avoid runaway pages.
+// - Supports file:// URLs for local file viewing (sanitized via
+//   sanitizeLocalFileUrl).
 
 import { NextRequest, NextResponse } from "next/server";
-import { sanitizePublicBrowserUrl } from "@/lib/sanitize-embedded-browser-url";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import {
+  sanitizeLocalFileUrl,
+  sanitizePublicBrowserUrl,
+} from "@/lib/sanitize-embedded-browser-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,13 +102,74 @@ async function readBoundedBody(response: Response): Promise<string> {
   return buffer.toString("utf-8");
 }
 
+async function readLocalFile(filePath: string): Promise<{
+  url: string;
+  title: string;
+  text: string;
+  contentType: string;
+} | null> {
+  try {
+    const stats = await fs.stat(filePath);
+    if (!stats.isFile()) return null;
+    if (stats.size > MAX_BYTES) {
+      return {
+        url: `file://${filePath}`,
+        title: path.basename(filePath),
+        text: `File too large (${Math.round(stats.size / 1024)}KB > ${MAX_BYTES / 1024}KB limit)`,
+        contentType: "text/plain",
+      };
+    }
+    const buf = await fs.readFile(filePath);
+    const head = buf.subarray(0, Math.min(buf.length, 8192));
+    if (head.includes(0)) {
+      return {
+        url: `file://${filePath}`,
+        title: path.basename(filePath),
+        text: "Binary file — cannot display as text.",
+        contentType: "application/octet-stream",
+      };
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType =
+      ext === ".md" || ext === ".markdown"
+        ? "text/markdown"
+        : ext === ".json"
+          ? "application/json"
+          : ext === ".html" || ext === ".htm"
+            ? "text/html"
+            : "text/plain";
+    const content = buf.toString("utf-8");
+    if (contentType === "text/html") {
+      const { title, text } = htmlToReadable(content, `file://${filePath}`);
+      return { url: `file://${filePath}`, title, text, contentType };
+    }
+    return {
+      url: `file://${filePath}`,
+      title: path.basename(filePath),
+      text: content,
+      contentType,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const raw = request.nextUrl.searchParams.get("url");
   if (!raw) return NextResponse.json({ error: "url is required" }, { status: 400 });
+
+  const localUrl = sanitizeLocalFileUrl(raw);
+  if (localUrl) {
+    const filePath = decodeURIComponent(new URL(localUrl).pathname);
+    const result = await readLocalFile(filePath);
+    if (result) return NextResponse.json(result);
+    return NextResponse.json({ error: `Could not read ${filePath}` }, { status: 404 });
+  }
+
   const safe = sanitizePublicBrowserUrl(raw);
   if (!safe) {
     return NextResponse.json(
-      { error: "url rejected (must be public http/https)" },
+      { error: "url rejected (must be public http/https or local file://)" },
       { status: 400 },
     );
   }

@@ -55,6 +55,13 @@ export function ApiConnectionSection({
             />
 
             <ApiField
+              label="Default Model"
+              value={apiSettings.defaultModel}
+              placeholder="e.g. openai/gpt-4o, anthropic/claude-3.5-sonnet"
+              onChange={(defaultModel) => onApiSettingsChange({ ...apiSettings, defaultModel })}
+            />
+
+            <ApiField
               label="Voice URL"
               value={apiSettings.voiceUrl}
               placeholder="https://voice.example.com"

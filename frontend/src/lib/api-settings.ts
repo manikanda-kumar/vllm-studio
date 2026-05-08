@@ -7,6 +7,7 @@ import { resolveDataDir, resolveSettingsFilePath } from "./data-dir";
 export interface ApiSettings {
   backendUrl: string;
   apiKey: string;
+  defaultModel: string;
   voiceUrl: string;
   voiceModel: string;
 }
@@ -14,6 +15,7 @@ export interface ApiSettings {
 const DEFAULT_SETTINGS: ApiSettings = {
   backendUrl: resolveSettingsDefaultBackendUrl(),
   apiKey: process.env.API_KEY || "",
+  defaultModel: process.env.DEFAULT_MODEL || process.env.NEXT_PUBLIC_DEFAULT_MODEL || "",
   voiceUrl: process.env.VOICE_URL || process.env.NEXT_PUBLIC_VOICE_URL || "",
   voiceModel:
     process.env.VOICE_MODEL || process.env.NEXT_PUBLIC_VOICE_MODEL || "whisper-large-v3-turbo",
@@ -27,6 +29,7 @@ export async function getApiSettings(): Promise<ApiSettings> {
     return {
       backendUrl: saved.backendUrl || DEFAULT_SETTINGS.backendUrl,
       apiKey: saved.apiKey || DEFAULT_SETTINGS.apiKey,
+      defaultModel: saved.defaultModel || DEFAULT_SETTINGS.defaultModel,
       voiceUrl: saved.voiceUrl || DEFAULT_SETTINGS.voiceUrl,
       voiceModel: saved.voiceModel || DEFAULT_SETTINGS.voiceModel,
     };
