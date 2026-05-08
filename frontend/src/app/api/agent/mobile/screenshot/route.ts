@@ -36,18 +36,30 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Check for MCP-level error first
+    if (result.isError) {
+      const textContent = result.content.find((c) => c.type === "text");
+      const errorMsg = textContent?.type === "text" ? textContent.text : "MCP tool error";
+      return Response.json({ error: errorMsg }, { status: 500 });
+    }
+
     const textContent = result.content.find((c) => c.type === "text");
     if (textContent && textContent.type === "text") {
-      const parsed = JSON.parse(textContent.text) as { image?: string; base64?: string };
-      const base64 = parsed.image ?? parsed.base64;
-      if (base64) {
-        const buffer = Buffer.from(base64, "base64");
-        return new Response(new Uint8Array(buffer), {
-          headers: {
-            "Content-Type": "image/png",
-            "Cache-Control": "no-store",
-          },
-        });
+      try {
+        const parsed = JSON.parse(textContent.text) as { image?: string; base64?: string };
+        const base64 = parsed.image ?? parsed.base64;
+        if (base64) {
+          const buffer = Buffer.from(base64, "base64");
+          return new Response(new Uint8Array(buffer), {
+            headers: {
+              "Content-Type": "image/png",
+              "Cache-Control": "no-store",
+            },
+          });
+        }
+      } catch {
+        // Text wasn't JSON, treat as error message
+        return Response.json({ error: textContent.text }, { status: 500 });
       }
     }
 

@@ -187,11 +187,11 @@ class MobileMcpClient {
   }
 
   async takeScreenshot(deviceId: string): Promise<McpToolResult> {
-    return this.callTool("mobile_take_screenshot", { deviceId });
+    return this.callTool("mobile_take_screenshot", { device: deviceId });
   }
 
   async tap(deviceId: string, x: number, y: number): Promise<McpToolResult> {
-    return this.callTool("mobile_click_on_screen_at_coordinates", { deviceId, x, y });
+    return this.callTool("mobile_click_on_screen_at_coordinates", { device: deviceId, x, y });
   }
 
   async pressButton(deviceId: string, button: string): Promise<McpToolResult> {
@@ -204,19 +204,19 @@ class MobileMcpClient {
       volume_down: "VOLUME_DOWN",
     };
     const mapped = buttonMap[button.toLowerCase()] || button;
-    return this.callTool("mobile_press_button", { deviceId, button: mapped });
+    return this.callTool("mobile_press_button", { device: deviceId, button: mapped });
   }
 
   async typeText(deviceId: string, text: string): Promise<McpToolResult> {
-    return this.callTool("mobile_type_keys", { deviceId, text });
+    return this.callTool("mobile_type_keys", { device: deviceId, text });
   }
 
   async getScreenSize(deviceId: string): Promise<McpToolResult> {
-    return this.callTool("mobile_get_screen_size", { deviceId });
+    return this.callTool("mobile_get_screen_size", { device: deviceId });
   }
 
   async listElements(deviceId: string): Promise<McpToolResult> {
-    return this.callTool("mobile_list_elements_on_screen", { deviceId });
+    return this.callTool("mobile_list_elements_on_screen", { device: deviceId });
   }
 }
 
