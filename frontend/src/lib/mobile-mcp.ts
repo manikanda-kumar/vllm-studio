@@ -229,3 +229,14 @@ export async function stopMobileMcp(): Promise<void> {
 
 export { MobileMcpClient };
 export type { McpToolResult, HealthStatus };
+
+// Graceful shutdown: stop mobile-mcp child on process termination.
+// This runs in the Next server process (not Electron main).
+if (typeof process !== "undefined") {
+  const gracefulShutdown = async () => {
+    await stopMobileMcp();
+    process.exit(0);
+  };
+  process.once("SIGTERM", gracefulShutdown);
+  process.once("SIGINT", gracefulShutdown);
+}

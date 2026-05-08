@@ -137,6 +137,16 @@ export async function startFrontendServer(): Promise<ServerHandle> {
 export async function stopFrontendServer(handle?: ServerHandle): Promise<void> {
   if (!handle?.process || handle.process.killed) return;
 
+  // Gracefully stop mobile-mcp before killing the Next child.
+  try {
+    await fetch(`${handle.runtime.url}/api/agent/mobile/shutdown`, {
+      method: "POST",
+      signal: AbortSignal.timeout(3_000),
+    });
+  } catch {
+    // Ignore — child may already be unresponsive.
+  }
+
   const child = handle.process;
   child.kill("SIGTERM");
 
