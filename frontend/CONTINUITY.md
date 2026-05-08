@@ -108,3 +108,15 @@ Cross-platform mobile device integration for vLLM Studio using mobile-mcp (MCP S
 ### Resources
 
 - `listResources()` returns **Method not found** — no resources exposed by this MCP server.
+
+---
+
+## Out-of-scope for MCP migration
+
+The following capabilities remain outside the MCP client because the `@mobilenext/mobile-mcp@0.0.54` server does not expose tools for them:
+
+- **`/api/agent/mobile/boot`** → Still uses `mobilecli` directly. No `mobile_boot_device` tool exists in the MCP server.
+- **`/api/agent/mobile/logs`** → Uses `adb logcat` (Android) and `xcrun simctl spawn` (iOS) directly. No `mobile_stream_logs` tool exists.
+- **`/api/agent/mobile/stream/*`** → Uses `serve-sim` independently. No `mobile_stream_screen` tool exists.
+
+All three routes inherit the enhanced PATH set by the parent process (`app-server.ts` on Electron fork, or the shell otherwise) and do not hardcode OS-specific paths.
