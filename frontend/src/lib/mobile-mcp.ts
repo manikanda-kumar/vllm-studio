@@ -67,8 +67,26 @@ class MobileMcpClient {
   }
 
   async ensureReady(): Promise<Client> {
-    if (this.ready && this.client) {
-      return this.client;
+    // Check if existing client is actually usable
+    if (this.ready && this.client && this.transport) {
+      // If we had a transport error, reset and reconnect
+      if (this.lastError && (this.lastError.includes("EPIPE") || this.lastError.includes("ECONNRESET"))) {
+        this.ready = false;
+        this.client = null;
+        this.transport = null;
+        this.lastError = null;
+      } else {
+        // Verify connection is still alive with a quick ping
+        try {
+          await this.client.ping({ timeout: 2000 });
+          return this.client;
+        } catch {
+          // Connection dead, reset and reconnect
+          this.ready = false;
+          this.client = null;
+          this.transport = null;
+        }
+      }
     }
 
     if (this.starting) {
@@ -114,6 +132,12 @@ class MobileMcpClient {
 
     transport.onerror = (err) => {
       this.lastError = err.message;
+      // Fatal transport errors (EPIPE, ECONNRESET) mean transport is dead
+      if (err.message.includes("EPIPE") || err.message.includes("ECONNRESET")) {
+        this.ready = false;
+        this.transport = null;
+        this.client = null;
+      }
     };
 
     const client = new Client({ name: "vllm-studio-mobile", version: "0.2.1" });
