@@ -5,9 +5,12 @@ test.describe("settings persistence", () => {
 
   test.beforeEach(async ({ page }) => {
     savedSettings = {};
-    await page.addInitScript(() => {
+    await page.goto("/settings#connection");
+    await page.evaluate(() => {
       window.localStorage.clear();
     });
+    await page.reload();
+    await page.waitForURL("/settings#connection");
 
     await page.route("**/api/settings", async (route) => {
       if (route.request().method() === "POST") {
@@ -18,9 +21,6 @@ test.describe("settings persistence", () => {
         await route.fulfill({ status: 200, body: JSON.stringify(savedSettings) });
       }
     });
-
-    await page.goto("/settings#connection");
-    await page.waitForURL("/settings#connection");
   });
 
   test("default model saves and re-loads", async ({ page }) => {
@@ -40,7 +40,7 @@ test.describe("settings persistence", () => {
     // Initially unset
     await expect(page.locator('span', { hasText: "unset" }).first()).toBeVisible();
 
-    const input = page.locator('input[type="password"]');
+    const input = page.locator('div.relative input');
     await input.fill("test-api-key-123");
 
     const saveButton = page.locator('button', { hasText: /^Save$/ });
@@ -52,26 +52,25 @@ test.describe("settings persistence", () => {
     // Reload and verify mask placeholder
     await page.reload();
     await page.waitForURL("/settings#connection");
-    const reloadedInput = page.locator('input[type="password"]');
+    const reloadedInput = page.locator('div.relative input');
     await expect(reloadedInput).toHaveAttribute("placeholder", "••••••••");
   });
 
   test("reveal hide API key toggles input type", async ({ page }) => {
-    const input = page.locator('input[type="password"]');
-    await expect(input).toHaveCount(1);
+    const input = page.locator('div.relative input');
+    await expect(input).toHaveAttribute("type", "password");
 
     // Click reveal
     const revealButton = page.locator('button[aria-label="Reveal API key"]');
     await revealButton.click();
 
-    const textInput = page.locator('input[type="text"]');
-    await expect(textInput).toHaveCount(1);
+    await expect(input).toHaveAttribute("type", "text");
 
     // Click hide
     const hideButton = page.locator('button[aria-label="Hide API key"]');
     await hideButton.click();
 
-    await expect(page.locator('input[type="password"]')).toHaveCount(1);
+    await expect(input).toHaveAttribute("type", "password");
   });
 
   test("theme change applies data-theme attribute", async ({ page }) => {
