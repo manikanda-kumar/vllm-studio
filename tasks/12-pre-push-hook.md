@@ -1,6 +1,6 @@
 # 12 — Pre-push hook wiring
 
-**Status:** `[ ]`
+**Status:** `[x]`
 **Depends on:** 10
 **Owner:** unassigned
 
