@@ -65,6 +65,7 @@ Thumbs.db
 frontend/playwright-report/
 frontend/test-results/
 frontend/test-output/
+frontend/test-artifacts/
 controller/test-output/
 reports/
 

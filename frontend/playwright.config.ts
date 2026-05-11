@@ -1,7 +1,7 @@
 // CRITICAL
 import { defineConfig } from "@playwright/test";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3210";
 
 /**
  * Chat sessions are stored in the controller SQLite DB. For isolation, start the
@@ -9,7 +9,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
  * (see `tests/README.md`). `PLAYWRIGHT_BACKEND_URL` must point at that same process.
  */
 export default defineConfig({
-  testDir: "./tests",
+  testDir: "./tests/e2e",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   use: {
@@ -18,6 +18,17 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
-  reporter: [["html", { open: "never" }], ["list"]],
+  reporter: [
+    ["json", { outputFile: "test-artifacts/results.json" }],
+    ["line"],
+    ["html", { open: "never", outputFolder: "test-artifacts/playwright-report" }],
+  ],
+  outputDir: "test-artifacts/playwright-output",
+  webServer: {
+    command: "PORT=3210 npm run dev",
+    url: "http://localhost:3210",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
 });
 
