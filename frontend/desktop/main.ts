@@ -85,6 +85,15 @@ async function shutdown(): Promise<void> {
 }
 
 async function run(): Promise<void> {
+  const cdpPort = process.env.VLLM_STUDIO_DESKTOP_CDP_PORT;
+  if (cdpPort) {
+    const portNum = parseInt(cdpPort, 10);
+    if (portNum >= 1024 && portNum <= 65535) {
+      app.commandLine.appendSwitch("remote-debugging-port", String(portNum));
+      log.info("CDP enabled on port " + portNum);
+    }
+  }
+
   const hasLock = app.requestSingleInstanceLock();
   if (!hasLock) {
     app.quit();

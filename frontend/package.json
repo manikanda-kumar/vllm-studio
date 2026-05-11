@@ -31,6 +31,8 @@
     "desktop:start:dev": "VLLM_STUDIO_DESKTOP_DEV_SERVER_URL=http://127.0.0.1:3000 electron desktop/dist/main.js",
     "desktop:build": "npm run build && npm run desktop:build:main && npm run desktop:build:extensions",
     "desktop:dev": "npm run desktop:build:main && concurrently -k -n NEXT,ELECTRON -c cyan,magenta \"npm run dev\" \"node -e \\\"setTimeout(() => process.exit(0), 3000)\\\" && npm run desktop:start:dev\"",
+    "desktop:dev:cdp": "VLLM_STUDIO_DESKTOP_CDP_PORT=9333 npm run desktop:dev",
+    "desktop:start:cdp": "VLLM_STUDIO_DESKTOP_CDP_PORT=9333 npm run desktop:start:dev",
     "desktop:dist": "npm run desktop:build && electron-builder --config desktop/electron-builder.yml",
     "desktop:pack": "npm run desktop:build && electron-builder --dir --config desktop/electron-builder.yml"
   },
