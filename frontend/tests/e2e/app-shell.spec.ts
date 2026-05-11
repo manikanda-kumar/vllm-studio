@@ -25,6 +25,10 @@ function isBenignError(text: string): boolean {
   // EventSource fallback when SSE endpoint is absent
   if (text.includes('EventSource\'s response has a MIME type ("text/html") that is not "text/event-stream"'))
     return true;
+  // API endpoints returning HTML 404 pages instead of JSON when controller is absent
+  if (text.includes("Unexpected token '<'")) return true;
+  if (text.includes("Failed to load recipes")) return true;
+  if (text.includes("Failed to load log sessions")) return true;
   return false;
 }
 
@@ -40,6 +44,11 @@ test.describe("app shell", () => {
         errors.push(text);
       }
     });
+    await page.goto("/");
+    await page.evaluate(() => {
+      localStorage.setItem("vllm-studio-state", JSON.stringify({ state: { liteMode: false }, version: 0 }));
+    });
+    await page.reload();
   });
 
   test.afterEach(async () => {
@@ -47,34 +56,32 @@ test.describe("app shell", () => {
   });
 
   test("renders dashboard", async ({ page }) => {
-    await page.goto("/");
     await expect(page.locator("aside")).toBeVisible();
     await expect(page.getByText("vLLM Studio").first()).toBeVisible();
     await screenshot(page, "dashboard");
   });
 
-  test("navigates to each top-level route", async ({ page }) => {
-    await page.goto("/");
+  const routes = [
+    { path: "/agent", label: "Agent", assert: (page) => expect(page.getByTestId("agent-page")).toBeVisible() },
+    { path: "/recipes", label: "Models", assert: (page) => expect(page.getByRole("heading", { name: "Models", exact: true }).first()).toBeVisible() },
+    { path: "/logs", label: "Server", assert: (page) => expect(page.getByText("Select a log session to view")).toBeVisible() },
+    { path: "/settings", label: "Settings", assert: (page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
+    { path: "/usage", label: "Usage", assert: (page) => expect(page.getByText("Usage").first()).toBeVisible() },
+  ];
 
-    const routes = [
-      { path: "/agent", label: "Agent", assert: () => expect(page.getByTestId("agent-page")).toBeVisible() },
-      { path: "/recipes", label: "Models", assert: () => expect(page.getByRole("heading", { name: "Models" })).toBeVisible() },
-      { path: "/logs", label: "Server", assert: () => expect(page.getByText("Select a log session to view")).toBeVisible() },
-      { path: "/settings", label: "Settings", assert: () => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
-      { path: "/usage", label: "Usage", assert: () => expect(page.getByText("Usage").first()).toBeVisible() },
-    ];
-
-    for (const route of routes) {
+  for (const route of routes) {
+    test(`navigates to ${route.path}`, async ({ page }) => {
+      await expect(page.locator("aside")).toBeVisible();
       await page.locator(`aside nav a[title="${route.label}"]`).click();
-      await page.waitForURL(route.path);
-      await route.assert();
+      await expect(page).toHaveURL(route.path);
+      await route.assert(page);
       await screenshot(page, route.path.replace("/", "") || "root");
-    }
-  });
+    });
+  }
 
   test("legacy /configs redirects to /settings", async ({ page }) => {
     await page.goto("/configs");
-    await expect(page).toHaveURL("/settings");
+    await page.waitForURL("/settings");
     await screenshot(page, "configs-redirect");
   });
 });
