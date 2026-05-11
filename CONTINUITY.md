@@ -45,9 +45,14 @@ Add mobile app testing support to vllm-studio for use as a coding agent with mob
   - `configs-tab-bar.tsx`: shows only Connection/Providers/Appearance in lite mode
   - `appearance-settings.tsx`: added Interface Mode toggle (Lite vs Full)
   - `page.tsx`: redirects `/` to `/agent` in lite mode
+- [x] Built-in agent verification loop — no user setup required:
+  - `frontend/desktop/resources/pi-extensions/verify.ts`: registers `verify_web`, `verify_mobile`, `verify_responsive`, `verify_until_pass` (commit a0c98a42)
+  - `frontend/src/lib/agent/pi-runtime.ts`: auto-loads the verify extension and appends a built-in system-prompt addendum on every pi spawn (commit ce53a44)
+  - `frontend/src/app/api/agent/turn/route.ts`: server-side safety net that intercepts the SSE stream, tracks file-write tool calls and verify_* calls per turn, and force-injects a verification follow-up prompt if the agent edited files but skipped verification (commit 5599143a)
+  - Result: cursor-style verification loop is shipped in the runtime instead of installed as `.cursor/skills/`
 
 ### Now
-- Lite mode implementation complete
+- Lite mode + built-in verification loop complete
 
 ### Next
 - [ ] Test mobile panel with real emulator/simulator
@@ -55,16 +60,22 @@ Add mobile app testing support to vllm-studio for use as a coding agent with mob
 - [ ] Verify agent can use mobilecli via Bash tool
 - [ ] Add Maestro integration for UI automation flows
 - [ ] Consider VLM-based visual verification (Qwen3-8B-VL)
+- [ ] Settings → Agent toggle to disable auto-verify (currently always on)
+- [ ] Wire a real `/api/agent/browser/resize` endpoint so `verify_responsive` actually changes viewport size (today it only re-screenshots at the current viewport)
 
 ## Open Questions
 - Does pi runtime need any config to allow mobilecli/serve-sim commands?
 - Should logs panel stream via SSE instead of polling?
+- Should auto-verify also run for `steer` / `follow_up` modes, or stay limited to `prompt` (current behavior)?
 
 ## Working Set
 - `frontend/src/app/agent/_components/mobile-panel.tsx`
 - `frontend/src/app/agent/_components/agent-workspace.tsx`
 - `frontend/src/app/api/agent/mobile/*`
 - `/Users/manik/Github/tools/projects/mobile-app-testing/android-vllm-chat/AGENTS.md`
+- `frontend/desktop/resources/pi-extensions/verify.ts`
+- `frontend/src/lib/agent/pi-runtime.ts`
+- `frontend/src/app/api/agent/turn/route.ts`
 
 ## Project Learnings
 - vllm-studio uses `pi` (pi.dev) as coding agent runtime with RPC

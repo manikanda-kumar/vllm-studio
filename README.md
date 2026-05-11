@@ -40,6 +40,24 @@ npm install -g mobilecli
 npm install -g serve-sim  # optional, iOS only
 ```
 
+## Agent Verification (built-in)
+
+The internal coding agent ships with a verification loop baked into the runtime — no `.cursor/skills/` setup, no opt-in flag, no per-project rules. Every fresh install gets it.
+
+After each file edit the agent is instructed (and, if needed, forced) to verify the change against the running app:
+
+- `verify_web` — navigate the embedded browser to a URL and capture screenshot / DOM / a11y tree.
+- `verify_mobile` — screenshot a connected device (iOS sim or Android emulator) and optionally tail logs.
+- `verify_responsive` — capture the same URL across mobile / tablet / desktop viewports.
+- `verify_until_pass` — iterative grind loop (up to 3 iterations) whose transcript the agent self-evaluates against free-form `success_criteria`.
+
+Two enforcement layers ship together:
+
+1. A built-in **system-prompt addendum** is injected on every agent spawn, telling the model when to call each tool.
+2. A server-side **safety net** in `/api/agent/turn` watches the SSE stream — if the agent edited frontend or mobile files but never called a `verify_*` tool, the server automatically issues a follow-up prompt that forces verification before closing the turn. Look for `auto_verify` SSE events in the chat stream.
+
+A user-facing toggle to disable auto-verify is on the roadmap; today it is always on.
+
 ## Release: v1.13.0
 
 This release consolidates major repo changes currently in the tree, including:
