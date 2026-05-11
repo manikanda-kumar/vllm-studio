@@ -25,6 +25,8 @@
     "check:cleanup": "npm run check:deadcode && npm run check:dupes && npm run depcheck",
     "check:fix": "knip --fix",
     "smoke": "node scripts/smoke.mjs",
+    "verify": "node scripts/verify.mjs",
+    "verify:full": "node scripts/verify.mjs --full",
     "desktop:build:main": "tsc -p desktop/tsconfig.json",
     "desktop:build:extensions": "tsc -p desktop/resources/pi-extensions/tsconfig.json",
     "desktop:start": "electron desktop/dist/main.js",
