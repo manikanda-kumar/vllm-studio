@@ -6,6 +6,7 @@ describe("resolveVoiceTarget", () => {
     const target = resolveVoiceTarget({
       backendUrl: "http://localhost:8080",
       apiKey: "",
+      defaultModel: "",
       voiceUrl: "https://voice.example.com/",
       voiceModel: "whisper-large-v3",
     });
@@ -20,6 +21,7 @@ describe("resolveVoiceTarget", () => {
     const target = resolveVoiceTarget({
       backendUrl: "http://localhost:8080/",
       apiKey: "",
+      defaultModel: "",
       voiceUrl: "http://localhost:8080",
       voiceModel: "whisper-large-v3",
     });
@@ -34,6 +36,7 @@ describe("resolveVoiceTarget", () => {
     const target = resolveVoiceTarget({
       backendUrl: "http://localhost:8080",
       apiKey: "",
+      defaultModel: "",
       voiceUrl: "",
       voiceModel: "whisper-large-v3",
     });

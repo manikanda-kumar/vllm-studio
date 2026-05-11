@@ -61,6 +61,7 @@ const eslintConfig = defineConfig([
     "playwright-report/**",
     "test-results/**",
     "desktop/dist/**",
+    "desktop/resources/pi-extensions/dist/**",
     "dist-desktop/**",
   ]),
 ]);

@@ -107,30 +107,28 @@ export function ConfigsView({
     () => (liteMode ? SECTIONS.filter((s) => LITE_SECTION_IDS.has(s.id)) : SECTIONS),
     [liteMode],
   );
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => {
+  const [rawActiveSection, setRawActiveSection] = useState<SettingsSectionId>(() => {
     if (typeof window === "undefined") return "connection";
     const hash = window.location.hash.replace("#", "");
     return isSectionId(hash) ? hash : "connection";
   });
-
-  useEffect(() => {
-    if (liteMode && !LITE_SECTION_IDS.has(activeSection)) {
-      setActiveSection("connection");
-    }
-  }, [liteMode, activeSection]);
+  // Derive the effective section instead of syncing via effect: in lite mode an
+  // infra section that isn't exposed falls back to "connection".
+  const activeSection: SettingsSectionId =
+    liteMode && !LITE_SECTION_IDS.has(rawActiveSection) ? "connection" : rawActiveSection;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
-      if (isSectionId(hash)) setActiveSection(hash);
+      if (isSectionId(hash)) setRawActiveSection(hash);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   const selectSection = (section: SettingsSectionId) => {
-    setActiveSection(section);
+    setRawActiveSection(section);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `#${section}`);
     }

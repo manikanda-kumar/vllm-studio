@@ -31,6 +31,7 @@ describe("api-settings", () => {
     await saveApiSettings({
       backendUrl: "http://100.90.62.80:8080",
       apiKey: "k",
+      defaultModel: "",
       voiceUrl: "https://voice.example.com",
       voiceModel: "whisper-large-v3-turbo",
     });

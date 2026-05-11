@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "@/store";
 import DashboardPage from "@/components/dashboard/page/dashboard-page";
@@ -8,19 +8,13 @@ import DashboardPage from "@/components/dashboard/page/dashboard-page";
 export default function RootPage() {
   const router = useRouter();
   const liteMode = useAppStore((s) => s.liteMode);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    // Wait for zustand persist to rehydrate
-    const unsub = useAppStore.persist.onFinishHydration(() => {
-      setHydrated(true);
-    });
-    // If already hydrated (e.g. hot reload)
-    if (useAppStore.persist.hasHydrated()) {
-      setHydrated(true);
-    }
-    return unsub;
-  }, []);
+  // Track zustand-persist rehydration without setState-in-effect: subscribe to
+  // onFinishHydration, snapshot hasHydrated(); server snapshot is always false.
+  const hydrated = useSyncExternalStore(
+    (onChange) => useAppStore.persist.onFinishHydration(onChange),
+    () => useAppStore.persist.hasHydrated(),
+    () => false,
+  );
 
   useEffect(() => {
     if (hydrated && liteMode) {

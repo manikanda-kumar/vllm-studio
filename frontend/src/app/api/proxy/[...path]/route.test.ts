@@ -18,6 +18,7 @@ describe("GET /api/proxy/[...path]", () => {
     getApiSettingsMock.mockResolvedValue({
       backendUrl: "https://api.example.test",
       apiKey: "test-key",
+      defaultModel: "",
       voiceUrl: "",
       voiceModel: "whisper-large-v3-turbo",
     });

@@ -38,6 +38,7 @@ describe("POST /api/voice/speak", () => {
     getApiSettingsMock.mockResolvedValue({
       backendUrl: "http://localhost:8080",
       apiKey: "settings-api-key",
+      defaultModel: "",
       voiceUrl: "",
       voiceModel: "whisper-large-v3",
     });

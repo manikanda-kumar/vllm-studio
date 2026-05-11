@@ -1797,7 +1797,7 @@ function ModelPicker({
           <div className="max-h-72 overflow-y-auto p-1">
             {filtered.length === 0 ? (
               <div className="px-2 py-3 text-center text-xs text-(--dim)">
-                No models match "{filter}"
+                No models match &ldquo;{filter}&rdquo;
               </div>
             ) : (
               filtered.map((model) => {
