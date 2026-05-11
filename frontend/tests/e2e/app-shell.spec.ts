@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -8,7 +8,7 @@ async function ensureDir(path: string) {
   await mkdir(path, { recursive: true });
 }
 
-async function screenshot(page, name: string) {
+async function screenshot(page: Page, name: string) {
   const path = `${ARTIFACT_DIR}/${name}.png`;
   await ensureDir(dirname(path));
   await page.screenshot({ path });
@@ -61,12 +61,12 @@ test.describe("app shell", () => {
     await screenshot(page, "dashboard");
   });
 
-  const routes = [
-    { path: "/agent", label: "Agent", assert: (page) => expect(page.getByTestId("agent-page")).toBeVisible() },
-    { path: "/recipes", label: "Models", assert: (page) => expect(page.getByRole("heading", { name: "Models", exact: true }).first()).toBeVisible() },
-    { path: "/logs", label: "Server", assert: (page) => expect(page.getByText("Select a log session to view")).toBeVisible() },
-    { path: "/settings", label: "Settings", assert: (page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
-    { path: "/usage", label: "Usage", assert: (page) => expect(page.getByText("Usage").first()).toBeVisible() },
+  const routes: Array<{ path: string; label: string; assert: (page: Page) => void }> = [
+    { path: "/agent", label: "Agent", assert: (page: Page) => expect(page.getByTestId("agent-page")).toBeVisible() },
+    { path: "/recipes", label: "Models", assert: (page: Page) => expect(page.getByRole("heading", { name: "Models", exact: true }).first()).toBeVisible() },
+    { path: "/logs", label: "Server", assert: (page: Page) => expect(page.getByText("Select a log session to view")).toBeVisible() },
+    { path: "/settings", label: "Settings", assert: (page: Page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
+    { path: "/usage", label: "Usage", assert: (page: Page) => expect(page.getByText("Usage").first()).toBeVisible() },
   ];
 
   for (const route of routes) {
