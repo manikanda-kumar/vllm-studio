@@ -68,7 +68,7 @@
     "@types/react-dom": "^19",
     "concurrently": "^9.2.1",
     "depcheck": "^1.4.7",
-    "electron": "^36.3.2",
+    "electron": "^36.9.5",
     "electron-builder": "^26.0.12",
     "eslint": "^9",
     "eslint-config-next": "16.0.10",
