@@ -118,6 +118,26 @@ function resolveMobileExtensionPath(): string | null {
   return null;
 }
 
+// Locate the compiled verify extension.
+function resolveVerifyExtensionPath(): string | null {
+  const envPath = process.env.VLLM_STUDIO_PI_EXTENSION_VERIFY_PATH;
+  if (envPath) return envPath;
+
+  if (process.env.NODE_ENV !== "production") {
+    const devPath = path.resolve(
+      process.cwd(),
+      "desktop",
+      "resources",
+      "pi-extensions",
+      "dist",
+      "verify.js",
+    );
+    if (existsSync(devPath)) return devPath;
+  }
+
+  return null;
+}
+
 function deriveFrontendBase(): string {
   const port = process.env.PORT || "3000";
   return `http://127.0.0.1:${port}`;
@@ -186,6 +206,20 @@ export async function refreshPiModels(): Promise<{ models: AgentModel[]; agentDi
   const agentDir = await writePiModelsConfig(settings, models);
   return { models, agentDir };
 }
+
+// Built-in system prompt addendum injected on every pi spawn so the model
+// knows the verification tools (registered by the verify pi-extension) exist
+// and when to call them. This is the agent-runtime equivalent of a
+// .cursor/rules/ file: shipped with vLLM Studio, no user setup required.
+const VERIFY_PROMPT_ADDENDUM = [
+  "## Built-in verification (vLLM Studio)",
+  "",
+  "After any edit_file call that touches frontend code (e.g., **/*.tsx, **/*.ts under app/, components/, src/), call verify_web with the relevant local URL (default http://127.0.0.1:3000 unless told otherwise) and checks=['screenshot']. Inspect the screenshot before reporting the change as done.",
+  "",
+  "After edits to mobile-related code (paths matching **/mobile-*, **/mobilecli*, **/mobile-mcp*, or files under api/agent/mobile/), call mobile_list_devices, then call verify_mobile against the first available device with actions=['screenshot'] (set boot=true if its state is offline).",
+  "",
+  "If a verification surfaces a regression, fix it and re-verify (you may use verify_until_pass with a clear success_criteria up to 3 iterations) before declaring the task done. Do not claim a UI change is complete without a verifying screenshot.",
+].join("\n");
 
 class PiRpcSession extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -277,6 +311,15 @@ class PiRpcSession extends EventEmitter {
     // Always load mobile extension if available - tools are no-ops without devices
     const mobileExtensionPath = resolveMobileExtensionPath();
     if (mobileExtensionPath) args.push("--extension", mobileExtensionPath);
+
+    // Always load the built-in verify extension; agent-side post-edit
+    // verification is on by default in vLLM Studio.
+    const verifyExtensionPath = resolveVerifyExtensionPath();
+    if (verifyExtensionPath) args.push("--extension", verifyExtensionPath);
+
+    // Inject the built-in verify prompt addendum so the model knows when
+    // to call verify_web / verify_mobile / verify_until_pass.
+    args.push("--append-system-prompt", VERIFY_PROMPT_ADDENDUM);
 
     const child = spawn(piBinaryPath(), args, {
       cwd,
