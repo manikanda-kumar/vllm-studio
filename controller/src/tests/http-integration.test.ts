@@ -22,19 +22,22 @@ describe("controller HTTP", () => {
     await rm(dbDir, { recursive: true, force: true });
   });
 
-  it("GET /health returns ok", async () => {
-    const res = await fetch(`${server.url}/health`);
+  it("GET /studio/providers returns array", async () => {
+    const res = await fetch(`${server.url}/studio/providers`);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toHaveProperty("status");
+    expect(body).toHaveProperty("providers");
+    expect(Array.isArray(body.providers)).toBe(true);
   });
 
-  it("GET /status returns controller info", async () => {
-    const res = await fetch(`${server.url}/status`);
+  it("GET /config returns system config", async () => {
+    const res = await fetch(`${server.url}/config`);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toHaveProperty("version");
-  });
+    expect(body).toHaveProperty("config");
+    expect(body).toHaveProperty("services");
+    expect(Array.isArray(body.services)).toBe(true);
+  }, 30_000);
 
   it("POST /studio/settings persists models_dir", async () => {
     const newDir = path.join(dbDir, "models");
