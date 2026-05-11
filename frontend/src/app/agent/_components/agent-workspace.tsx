@@ -19,6 +19,10 @@ import {
 } from "@/lib/sanitize-embedded-browser-url";
 import { ChevronDownIcon, CloseIcon, ComputerIcon, PlusIcon } from "@/components/icons";
 import { safeJson } from "@/lib/agent/safe-json";
+import {
+  mergeActiveAgentSessions,
+  type ActiveAgentSessionSnapshot,
+} from "@/lib/agent/active-sessions";
 import { AgentBrowser, type AgentBrowserHandle, type WebviewElement } from "./agent-browser";
 import { ChatPane, makeFreshTab, type ChatPaneHandle, type SessionTab } from "./chat-pane";
 import { FilesystemPanel } from "./filesystem-panel";
@@ -182,7 +186,7 @@ type PersistedPaneState = {
   >;
 };
 
-function normalizePersistedTab(value: unknown): SessionTab | null {
+export function normalizePersistedTab(value: unknown): SessionTab | null {
   if (!value || typeof value !== "object") return null;
   const tab = value as Partial<SessionTab>;
   if (typeof tab.id !== "string" || typeof tab.runtimeSessionId !== "string") return null;
@@ -195,16 +199,25 @@ function normalizePersistedTab(value: unknown): SessionTab | null {
     piSessionId: typeof tab.piSessionId === "string" ? tab.piSessionId : null,
     title: typeof tab.title === "string" && tab.title.trim() ? tab.title : fallback.title,
     messages: Array.isArray(tab.messages) ? tab.messages.slice(-80) : [],
-    status:
-      tab.status === "running" || tab.status === "starting" || tab.status === "loading"
-        ? "idle"
-        : typeof tab.status === "string"
-          ? tab.status
-          : "idle",
+    status: typeof tab.status === "string" ? tab.status : "idle",
     error: "",
+    startedAt: typeof tab.startedAt === "string" ? tab.startedAt : undefined,
     input: typeof tab.input === "string" ? tab.input : "",
     queue: Array.isArray(tab.queue) ? tab.queue : undefined,
+    activeAssistantId:
+      typeof tab.activeAssistantId === "string" ? tab.activeAssistantId : undefined,
+    lastEventSeq: typeof tab.lastEventSeq === "number" ? tab.lastEventSeq : undefined,
+    plugins: Array.isArray(tab.plugins) ? tab.plugins : undefined,
+    skills: Array.isArray(tab.skills) ? tab.skills : undefined,
   };
+}
+
+export function setupWarningFromPiCheck(
+  piCheck: { ok: boolean; guidance?: string } | undefined,
+  hasUsableModels: boolean,
+): string {
+  if (hasUsableModels || !piCheck || piCheck.ok) return "";
+  return piCheck.guidance ?? "Pi is not installed.";
 }
 
 function restorePersistedPaneState(raw: string): {
@@ -248,26 +261,10 @@ function tabForPersistence(tab: SessionTab): SessionTab {
   return {
     ...tab,
     messages: tab.messages.slice(-80),
-    status:
-      tab.status === "running" || tab.status === "starting" || tab.status === "loading"
-        ? "idle"
-        : tab.status,
+    status: tab.status,
     error: "",
   };
 }
-
-type ActiveAgentSessionSnapshot = {
-  projectId: string;
-  cwd: string;
-  paneId: string;
-  tabId: string;
-  piSessionId: string | null;
-  modelId?: string;
-  title: string;
-  status: string;
-  active?: boolean;
-  updatedAt: string;
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -278,6 +275,8 @@ function loadPersistedActiveAgentSessions(): ActiveAgentSessionSnapshot[] {
   try {
     const raw = window.localStorage.getItem(ACTIVE_AGENT_SESSIONS_SNAPSHOT_KEY);
     if (!raw) return [];
+    const prefsRaw = window.localStorage.getItem("vllm-studio.agent.sessionPrefs");
+    const prefs = prefsRaw ? (JSON.parse(prefsRaw) as Record<string, { hidden?: boolean }>) : {};
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed
@@ -294,15 +293,21 @@ function loadPersistedActiveAgentSessions(): ActiveAgentSessionSnapshot[] {
           title: typeof entry.title === "string" ? entry.title : "Loading session",
           status: typeof entry.status === "string" ? entry.status : "idle",
           active: entry.active === true,
+          startedAt: typeof entry.startedAt === "string" ? entry.startedAt : undefined,
           updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
+          plugins: Array.isArray(entry.plugins)
+            ? (entry.plugins as SessionTab["plugins"])
+            : undefined,
+          skills: Array.isArray(entry.skills) ? (entry.skills as SessionTab["skills"]) : undefined,
         };
       })
       .filter(
         (entry) =>
-          Boolean(entry.piSessionId) &&
+          !prefs[entry.piSessionId ?? ""]?.hidden &&
           Boolean(entry.projectId) &&
           Boolean(entry.cwd) &&
-          Boolean(entry.paneId),
+          Boolean(entry.paneId) &&
+          Boolean(entry.tabId),
       );
   } catch {
     return [];
@@ -311,12 +316,19 @@ function loadPersistedActiveAgentSessions(): ActiveAgentSessionSnapshot[] {
 
 function persistActiveAgentSessions(sessions: ActiveAgentSessionSnapshot[]) {
   if (typeof window === "undefined") return;
-  const recoverable = sessions.filter((session) => Boolean(session.piSessionId));
-  if (recoverable.length === 0) {
-    window.localStorage.removeItem(ACTIVE_AGENT_SESSIONS_SNAPSHOT_KEY);
-    return;
+  let prefs: Record<string, { hidden?: boolean }> = {};
+  try {
+    const raw = window.localStorage.getItem("vllm-studio.agent.sessionPrefs");
+    prefs = raw ? (JSON.parse(raw) as Record<string, { hidden?: boolean }>) : {};
+  } catch {
+    prefs = {};
   }
-  window.localStorage.setItem(ACTIVE_AGENT_SESSIONS_SNAPSHOT_KEY, JSON.stringify(recoverable));
+  const merged = mergeActiveAgentSessions(loadPersistedActiveAgentSessions(), sessions, prefs);
+  if (merged.length > 0) {
+    window.localStorage.setItem(ACTIVE_AGENT_SESSIONS_SNAPSHOT_KEY, JSON.stringify(merged));
+  } else {
+    window.localStorage.removeItem(ACTIVE_AGENT_SESSIONS_SNAPSHOT_KEY);
+  }
 }
 
 function layoutFromPaneIds(paneIds: PaneId[]): Layout {
@@ -345,7 +357,25 @@ function tabFromSnapshot(session: ActiveAgentSessionSnapshot): SessionTab {
     // JSONL and let the user continue from the recovered tab instead of
     // resurrecting a permanently "running" UI state.
     status: "loading",
+    startedAt: session.startedAt ?? session.updatedAt,
+    plugins: session.plugins,
+    skills: session.skills,
   };
+}
+
+function isEmptyStarterTab(tab: SessionTab): boolean {
+  return !tab.piSessionId && tab.messages.length === 0 && !tab.input.trim();
+}
+
+function findPaneTabByPiSessionId(
+  panes: Map<PaneId, PaneState>,
+  piSessionId: string,
+): { paneId: PaneId; tab: SessionTab } | null {
+  for (const [paneId, pane] of panes.entries()) {
+    const tab = pane.tabs.find((entry) => entry.piSessionId === piSessionId);
+    if (tab) return { paneId, tab };
+  }
+  return null;
 }
 
 export function AgentWorkspace() {
@@ -365,6 +395,7 @@ export function AgentWorkspace() {
   const [computerWidth, setComputerWidth] = useState(DEFAULT_COMPUTER_WIDTH);
   const [gitSummaries, setGitSummaries] = useState<Map<string, GitSummary>>(new Map());
   const [panePersistenceReady, setPanePersistenceReady] = useState(false);
+  const [setupWarning, setSetupWarning] = useState<string>("");
 
   // Pane state: a tree-shaped Layout where each leaf is identified by a
   // PaneId and points into panesById, which holds tabs + the per-pane
@@ -400,6 +431,7 @@ export function AgentWorkspace() {
   // session — no useEffect-driven prop chain, no replay races.
   const paneHandlesRef = useRef<Map<PaneId, ChatPaneHandle>>(new Map());
   const pendingSessionReplaysRef = useRef<Map<PaneId, string>>(new Map());
+  const usableModelsRef = useRef(false);
   const queueSessionReplay = useCallback((paneId: PaneId, sessionId: string) => {
     pendingSessionReplaysRef.current.set(paneId, sessionId);
     window.setTimeout(() => {
@@ -422,6 +454,16 @@ export function AgentWorkspace() {
 
   useEffect(() => {
     let cancelled = false;
+    void fetch("/api/agent/setup-checks", { cache: "no-store" })
+      .then((res) =>
+        safeJson<{ checks?: Array<{ id: string; ok: boolean; guidance?: string }> }>(res),
+      )
+      .then((payload) => {
+        if (cancelled) return;
+        const pi = payload.checks?.find((check) => check.id === "pi");
+        setSetupWarning(setupWarningFromPiCheck(pi, usableModelsRef.current));
+      })
+      .catch(() => undefined);
     async function loadModels() {
       setLoadingModels(true);
       setError("");
@@ -434,6 +476,8 @@ export function AgentWorkspace() {
         if (!modelsResponse.ok) throw new Error(payload.error || "Failed to load models");
         if (cancelled) return;
         const nextModels = payload.models ?? [];
+        usableModelsRef.current = nextModels.length > 0;
+        if (usableModelsRef.current) setSetupWarning("");
         setModels(nextModels);
 
         let defaultModel = "";
@@ -575,6 +619,9 @@ export function AgentWorkspace() {
       // Iframe fallback (dev or non-electron). Cross-origin restrictions make
       // most operations impossible — handle the few that are still useful.
       const iframe = getIframe();
+      if (!iframe && verb === "get-url") {
+        return { ok: true, data: { url: browserUrl, title: "" } };
+      }
       if (!iframe) return { ok: false, error: "Browser panel not mounted" };
       switch (verb) {
         case "navigate": {
@@ -594,7 +641,7 @@ export function AgentWorkspace() {
           };
       }
     },
-    [isElectron],
+    [browserUrl, isElectron],
   );
 
   // Open an SSE subscription to /api/agent/browser/events whenever the
@@ -807,22 +854,6 @@ export function AgentWorkspace() {
       setSelectedProjectId(project.id);
       setAgentCwd(project.path);
       persistSelectedProjectId(project.id);
-      // A different project has its own session pool — reset every pane to a
-      // fresh tab so the next turn starts a brand-new pi session in the new
-      // project. Each pane keeps its runtimeSessionId so the pi child gets
-      // a clean restart on the next /api/agent/turn.
-      setPanesById((current) => {
-        const next = new Map<PaneId, PaneState>();
-        for (const [paneId, pane] of current.entries()) {
-          const tab = makeFreshTab();
-          next.set(paneId, {
-            tabs: [tab],
-            activeTabId: tab.id,
-            runtimeSessionId: pane.runtimeSessionId,
-          });
-        }
-        return next;
-      });
     },
     [persistSelectedProjectId],
   );
@@ -843,10 +874,12 @@ export function AgentWorkspace() {
     if (paneStateAlreadyRestored) {
       for (const [paneId, pane] of panesById.entries()) {
         const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0];
-        // If paneState already has local messages, keep that transcript as the
-        // newest source of truth. A replay can lag an interrupted in-flight
-        // turn and would otherwise erase the visible prompt the user just sent.
-        if (activeTab?.piSessionId && activeTab.messages.length === 0) {
+        if (
+          activeTab?.piSessionId &&
+          (activeTab.messages.length === 0 ||
+            activeTab.status === "running" ||
+            activeTab.status === "starting")
+        ) {
           queueSessionReplay(paneId, activeTab.piSessionId);
         }
       }
@@ -920,23 +953,48 @@ export function AgentWorkspace() {
   // Idempotent "open a fresh chat tab in the focused pane". If the pane
   // already has an empty starter (no piSessionId, no messages, no input)
   // we focus that tab instead of stacking yet another empty one.
-  const openNewSessionInFocusedPane = useCallback(() => {
-    setPanesById((current) => {
-      const cur = current.get(focusedPaneId);
-      if (!cur) return current;
-      const existing = cur.tabs.find(
-        (tab) => !tab.piSessionId && tab.messages.length === 0 && !tab.input,
-      );
-      const next = new Map(current);
-      if (existing) {
-        next.set(focusedPaneId, { ...cur, activeTabId: existing.id });
-        return next;
+  const openNewSessionInFocusedPane = useCallback(
+    (projectOverride?: ProjectEntry) => {
+      if (projectOverride) {
+        setSelectedProjectId(projectOverride.id);
+        setAgentCwd(projectOverride.path);
+        persistSelectedProjectId(projectOverride.id);
       }
-      const tab = makeFreshTab();
-      next.set(focusedPaneId, { ...cur, tabs: [...cur.tabs, tab], activeTabId: tab.id });
-      return next;
-    });
-  }, [focusedPaneId]);
+      setPanesById((current) => {
+        const cur = current.get(focusedPaneId);
+        if (!cur) return current;
+        const targetProjectId = projectOverride?.id;
+        const targetCwd = projectOverride?.path;
+        const existing = cur.tabs.find((tab) => {
+          if (!isEmptyStarterTab(tab)) return false;
+          if (targetProjectId && tab.projectId && tab.projectId !== targetProjectId) return false;
+          if (targetCwd && tab.cwd && tab.cwd !== targetCwd) return false;
+          return true;
+        });
+        const next = new Map(current);
+        if (existing) {
+          next.set(focusedPaneId, {
+            ...cur,
+            tabs: cur.tabs.map((tab) =>
+              tab.id === existing.id && projectOverride
+                ? { ...tab, projectId: projectOverride.id, cwd: projectOverride.path }
+                : tab,
+            ),
+            activeTabId: existing.id,
+          });
+          return next;
+        }
+        const tab = {
+          ...makeFreshTab(),
+          projectId: projectOverride?.id,
+          cwd: projectOverride?.path,
+        };
+        next.set(focusedPaneId, { ...cur, tabs: [...cur.tabs, tab], activeTabId: tab.id });
+        return next;
+      });
+    },
+    [focusedPaneId, persistSelectedProjectId],
+  );
 
   // Replay a past pi session into the focused pane via the pane's
   // imperative handle. No race: the handle was registered when the pane
@@ -944,9 +1002,35 @@ export function AgentWorkspace() {
   // will retry.
   const replaySessionInFocusedPane = useCallback(
     (piSessionId: string) => {
-      queueSessionReplay(focusedPaneId, piSessionId);
+      const existingPaneTab = findPaneTabByPiSessionId(panesById, piSessionId);
+      const replayPaneId = existingPaneTab?.paneId ?? focusedPaneId;
+      setPanesById((current) => {
+        const existing = findPaneTabByPiSessionId(current, piSessionId);
+        if (existing) {
+          const pane = current.get(existing.paneId);
+          if (!pane || pane.activeTabId === existing.tab.id) return current;
+          const next = new Map(current);
+          next.set(existing.paneId, { ...pane, activeTabId: existing.tab.id });
+          return next;
+        }
+        const pane = current.get(focusedPaneId);
+        if (!pane) return current;
+        const active = pane.tabs.find((tab) => tab.id === pane.activeTabId);
+        const targetTab = active && isEmptyStarterTab(active) ? active : null;
+        const replayTab = targetTab
+          ? { ...targetTab, piSessionId, title: targetTab.title || "Loading session" }
+          : { ...makeFreshTab(), piSessionId, title: "Loading session" };
+        const nextTabs = targetTab
+          ? pane.tabs.map((tab) => (tab.id === targetTab.id ? replayTab : tab))
+          : [...pane.tabs, replayTab];
+        const next = new Map(current);
+        next.set(focusedPaneId, { ...pane, tabs: nextTabs, activeTabId: replayTab.id });
+        return next;
+      });
+      setFocusedPaneId(replayPaneId);
+      queueSessionReplay(replayPaneId, piSessionId);
     },
-    [focusedPaneId, queueSessionReplay],
+    [focusedPaneId, panesById, queueSessionReplay],
   );
 
   // Open a past session in a side-by-side pane. Splits the layout if there
@@ -954,15 +1038,35 @@ export function AgentWorkspace() {
   // the queue drains as soon as the new ChatPane registers its handle.
   const replaySessionInSplitPane = useCallback(
     (piSessionId: string) => {
+      const existing = findPaneTabByPiSessionId(panesById, piSessionId);
+      if (existing) {
+        setFocusedPaneId(existing.paneId);
+        setPanesById((current) => {
+          const pane = current.get(existing.paneId);
+          if (!pane || pane.activeTabId === existing.tab.id) return current;
+          const next = new Map(current);
+          next.set(existing.paneId, { ...pane, activeTabId: existing.tab.id });
+          return next;
+        });
+        return;
+      }
       const leaves = collectLeaves(layout);
       if (leaves.length >= 2) {
         const targetPaneId = leaves.find((id) => id !== focusedPaneId) ?? focusedPaneId;
+        setPanesById((current) => {
+          const pane = current.get(targetPaneId);
+          if (!pane) return current;
+          const tab = { ...makeFreshTab(), piSessionId, title: "Loading session" };
+          const next = new Map(current);
+          next.set(targetPaneId, { ...pane, tabs: [...pane.tabs, tab], activeTabId: tab.id });
+          return next;
+        });
         setFocusedPaneId(targetPaneId);
         queueSessionReplay(targetPaneId, piSessionId);
         return;
       }
       const id = newPaneId();
-      const baseTab = makeFreshTab();
+      const baseTab = { ...makeFreshTab(), piSessionId, title: "Loading session" };
       setPanesById((current) => {
         const next = new Map(current);
         next.set(id, {
@@ -976,7 +1080,7 @@ export function AgentWorkspace() {
       setFocusedPaneId(id);
       queueSessionReplay(id, piSessionId);
     },
-    [focusedPaneId, layout, queueSessionReplay],
+    [focusedPaneId, layout, panesById, queueSessionReplay],
   );
 
   // Single source of truth for URL nav. Re-run only when the URL string
@@ -1093,6 +1197,11 @@ export function AgentWorkspace() {
   );
   const focusedPane = panesById.get(focusedPaneId) ?? panesById.values().next().value ?? null;
   const focusedTab = focusedPane?.tabs.find((tab) => tab.id === focusedPane.activeTabId) ?? null;
+  const focusedComputerUseLoaded = (focusedTab?.plugins ?? []).some((plugin) =>
+    [plugin.id, plugin.name, plugin.path].some((value) =>
+      value?.toLowerCase().includes("computer-use"),
+    ),
+  );
   const focusedProject =
     projects.find((entry) => entry.id === focusedTab?.projectId) ??
     projects.find((entry) => entry.path === focusedTab?.cwd) ??
@@ -1186,7 +1295,10 @@ export function AgentWorkspace() {
             title: tab.title,
             status: tab.status,
             active: paneId === focusedPaneId && tab.id === pane.activeTabId,
+            startedAt: tab.startedAt,
             updatedAt: new Date().toISOString(),
+            plugins: tab.plugins,
+            skills: tab.skills,
           };
         }),
     );
@@ -1197,15 +1309,27 @@ export function AgentWorkspace() {
   const openSessionPayloadInPane = useCallback(
     (paneId: PaneId, payload: SessionDropPayload) => {
       let needsReplay = false;
+      const existingPaneTab = payload.piSessionId
+        ? findPaneTabByPiSessionId(panesById, payload.piSessionId)
+        : null;
+      const replayPaneId = existingPaneTab?.paneId ?? paneId;
       setPanesById((current) => {
         const target = current.get(paneId);
         if (!target) return current;
         const next = new Map(current);
         if (payload.piSessionId) {
+          const existing = findPaneTabByPiSessionId(current, payload.piSessionId);
+          if (existing) {
+            const existingPane = current.get(existing.paneId);
+            if (!existingPane) return current;
+            next.set(existing.paneId, { ...existingPane, activeTabId: existing.tab.id });
+            return next;
+          }
           const tab = {
             ...makeFreshTab(),
             projectId: payload.projectId,
             cwd: payload.cwd,
+            piSessionId: payload.piSessionId,
             title: payload.title ?? "Loading session",
           };
           next.set(paneId, {
@@ -1230,12 +1354,12 @@ export function AgentWorkspace() {
         }
         return next;
       });
-      setFocusedPaneId(paneId);
+      setFocusedPaneId(replayPaneId);
       if (needsReplay && payload.piSessionId) {
-        queueSessionReplay(paneId, payload.piSessionId);
+        queueSessionReplay(replayPaneId, payload.piSessionId);
       }
     },
-    [queueSessionReplay],
+    [panesById, queueSessionReplay],
   );
 
   // Imperative tab actions used by both URL nav and DOM-event listeners.
@@ -1328,8 +1452,9 @@ export function AgentWorkspace() {
       const h = navHandlersRef.current;
       if (detail?.projectId) {
         const target = h.projects.find((entry) => entry.id === detail.projectId);
-        if (target && h.selectedProjectId !== target.id) {
-          h.selectProject(target);
+        if (target) {
+          if (h.selectedProjectId !== target.id) h.selectProject(target);
+          h.openNewSessionInFocusedPane(target);
           return;
         }
       }
@@ -1369,6 +1494,11 @@ export function AgentWorkspace() {
           {error}
         </div>
       ) : null}
+      {setupWarning ? (
+        <div className="border-b border-(--border) bg-(--hl3)/10 px-4 py-2 text-xs text-(--hl3)">
+          Agent setup: {setupWarning} Open Settings → Setup for details.
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
         <section className="relative flex min-w-0 flex-1 flex-col">
@@ -1390,7 +1520,18 @@ export function AgentWorkspace() {
             title={rightPanelOpen ? "Hide computer" : "Show computer"}
             aria-label={rightPanelOpen ? "Hide computer" : "Show computer"}
           >
-            <ComputerIcon className="h-4 w-4" />
+            <span className="relative inline-flex">
+              <ComputerIcon className="h-4 w-4" />
+              {focusedComputerUseLoaded ? (
+                <span
+                  className="absolute -right-1.5 -top-1 inline-flex h-2.5 w-2.5 items-center justify-center"
+                  aria-hidden="true"
+                >
+                  <span className="absolute h-2.5 w-2.5 animate-ping rounded-full bg-(--accent)/35" />
+                  <span className="relative h-1.5 w-1.5 rounded-full bg-(--accent)" />
+                </span>
+              ) : null}
+            </span>
           </button>
           {shouldShowProjectEmptyState ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6">
@@ -1428,6 +1569,13 @@ export function AgentWorkspace() {
                   const paneCwd = paneActiveTab?.cwd ?? paneProject?.path ?? agentCwd;
                   const paneModelId = paneActiveTab?.modelId ?? selectedModel;
                   const paneModel = models.find((model) => model.id === paneModelId) ?? null;
+                  const paneGitSummary = paneProject?.path
+                    ? (gitSummaries.get(paneProject.path) ?? null)
+                    : null;
+                  const paneGitBranch =
+                    paneGitSummary?.isRepo === false
+                      ? null
+                      : (paneGitSummary?.branch ?? paneProject?.branch ?? null);
                   const paneTabIsNew =
                     Boolean(paneActiveTab) &&
                     !paneActiveTab?.piSessionId &&
@@ -1468,7 +1616,10 @@ export function AgentWorkspace() {
                               });
                             }}
                             disabled={!paneTabIsNew}
-                            className="!h-7 !min-h-7 w-full min-w-0 truncate rounded-md border-0 bg-transparent px-2 py-0 font-mono !text-[11px] text-(--dim) outline-none hover:bg-(--surface) hover:text-(--fg) disabled:opacity-100"
+                            className="!h-7 !min-h-7 max-w-full min-w-0 truncate rounded-md border-0 bg-transparent px-2 py-0 font-mono !text-[11px] text-(--dim) outline-none hover:bg-(--surface) hover:text-(--fg) disabled:opacity-100"
+                            style={{
+                              width: `${Math.min(Math.max(paneProject.path.length + 3, 12), 54)}ch`,
+                            }}
                             title={
                               paneTabIsNew
                                 ? "Change directory for this new session"
@@ -1484,14 +1635,8 @@ export function AgentWorkspace() {
                           </select>
                         ) : null
                       }
-                      gitBranch={
-                        (paneProject?.path ? gitSummaries.get(paneProject.path)?.branch : null) ??
-                        paneProject?.branch ??
-                        null
-                      }
-                      gitSummary={
-                        paneProject?.path ? (gitSummaries.get(paneProject.path) ?? null) : null
-                      }
+                      gitBranch={paneGitBranch}
+                      gitSummary={paneGitSummary}
                       onInitGit={initGitForActiveProject}
                       modelSelector={
                         <ModelPicker
@@ -1558,6 +1703,20 @@ export function AgentWorkspace() {
                 }}
                 onSplit={(paneId, direction, side, payload) => {
                   // Create a new pane next to the drop target.
+                  if (payload.piSessionId) {
+                    const existing = findPaneTabByPiSessionId(panesById, payload.piSessionId);
+                    if (existing) {
+                      setFocusedPaneId(existing.paneId);
+                      setPanesById((current) => {
+                        const pane = current.get(existing.paneId);
+                        if (!pane) return current;
+                        const next = new Map(current);
+                        next.set(existing.paneId, { ...pane, activeTabId: existing.tab.id });
+                        return next;
+                      });
+                      return;
+                    }
+                  }
                   const id = newPaneId();
                   if (collectLeaves(layout).length >= 2) return;
                   const runtime = newRuntimeId();
@@ -1565,6 +1724,7 @@ export function AgentWorkspace() {
                     ...makeFreshTab(),
                     projectId: payload.projectId,
                     cwd: payload.cwd,
+                    piSessionId: payload.piSessionId ?? null,
                     title: payload.title ?? "Loading session",
                   };
                   setPanesById((current) => {
@@ -1619,7 +1779,7 @@ export function AgentWorkspace() {
               onMouseDown={startComputerResize}
               className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize hover:bg-(--accent)/20"
             />
-            <div className="flex h-9 shrink-0 items-center gap-1 border-b border-(--border) px-2 text-xs text-(--dim)">
+            <div className="flex h-9 shrink-0 items-center gap-3 px-3 text-xs text-(--dim)">
               <span
                 className="min-w-0 flex-1 truncate px-1 text-[10px] uppercase tracking-wide"
                 title={`Computer follows focused session: ${focusedTab?.title ?? "New session"}`}
@@ -1629,10 +1789,8 @@ export function AgentWorkspace() {
               <button
                 type="button"
                 onClick={() => selectComputerTab("browser")}
-                className={`h-6 shrink-0 rounded px-2 font-medium uppercase tracking-wide ${
-                  activeComputerTab === "browser"
-                    ? "bg-(--surface) text-(--fg)"
-                    : "hover:bg-(--surface) hover:text-(--fg)"
+                className={`h-6 shrink-0 font-medium uppercase tracking-wide ${
+                  activeComputerTab === "browser" ? "text-(--fg)" : "hover:text-(--fg)"
                 }`}
               >
                 Browser
@@ -1640,10 +1798,8 @@ export function AgentWorkspace() {
               <button
                 type="button"
                 onClick={() => selectComputerTab("files")}
-                className={`h-6 shrink-0 rounded px-2 font-medium uppercase tracking-wide ${
-                  activeComputerTab === "files"
-                    ? "bg-(--surface) text-(--fg)"
-                    : "hover:bg-(--surface) hover:text-(--fg)"
+                className={`h-6 shrink-0 font-medium uppercase tracking-wide ${
+                  activeComputerTab === "files" ? "text-(--fg)" : "hover:text-(--fg)"
                 }`}
               >
                 Files
@@ -1651,10 +1807,8 @@ export function AgentWorkspace() {
               <button
                 type="button"
                 onClick={() => selectComputerTab("diff")}
-                className={`h-6 shrink-0 rounded px-2 font-medium uppercase tracking-wide ${
-                  activeComputerTab === "diff"
-                    ? "bg-(--surface) text-(--fg)"
-                    : "hover:bg-(--surface) hover:text-(--fg)"
+                className={`h-6 shrink-0 font-medium uppercase tracking-wide ${
+                  activeComputerTab === "diff" ? "text-(--fg)" : "hover:text-(--fg)"
                 }`}
               >
                 Diff
@@ -1678,7 +1832,7 @@ export function AgentWorkspace() {
                   setRightPanelOpen(false);
                   window.localStorage.setItem(COMPUTER_BROWSER_OPEN_KEY, "0");
                 }}
-                className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-(--surface) hover:text-(--fg)"
+                className="ml-1 inline-flex h-7 w-7 items-center justify-center hover:text-(--fg)"
                 title="Close"
                 aria-label="Close computer"
               >
@@ -1767,23 +1921,34 @@ function ModelPicker({
   const disabled = loading || models.length === 0;
 
   return (
-    <div ref={containerRef} className="relative shrink-0">
+    <div
+      ref={containerRef}
+      className="relative shrink-0"
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
       <button
         type="button"
+        onPointerDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
         onClick={() => {
           if (disabled) return;
           setOpen((value) => !value);
           setFilter("");
         }}
         disabled={disabled}
-        className="inline-flex !h-7 !min-h-7 !min-w-0 max-w-[140px] items-center gap-1.5 rounded-md border-0 bg-transparent px-2 !text-xs text-(--fg) hover:bg-(--surface) disabled:opacity-60"
+        className="inline-flex !h-7 !min-h-7 !min-w-0 max-w-[150px] items-center gap-1.5 bg-transparent px-2 !text-xs text-(--fg) hover:text-(--accent) disabled:opacity-60"
         title={active?.name || triggerLabel}
       >
         <span className="min-w-0 max-w-[118px] truncate">{triggerLabel}</span>
         <ChevronDownIcon className="h-3 w-3 shrink-0 text-(--dim)" />
       </button>
       {open ? (
-        <div className="fixed right-4 bottom-20 z-[9999] w-80 rounded-md border border-(--border) bg-(--surface) shadow-lg">
+        <div
+          className="absolute bottom-9 right-0 z-[80] w-72 border border-(--border) bg-(--surface) shadow-lg"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
           <div className="border-b border-(--border) p-1.5">
             <input
               ref={inputRef}
@@ -1791,7 +1956,7 @@ function ModelPicker({
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
               placeholder="Filter models… (e.g. openai, claude)"
-              className="w-full rounded border border-(--border) bg-(--bg) px-2 py-1 text-xs text-(--fg) placeholder-(--dim) outline-none focus:border-(--accent)"
+              className="w-full border border-(--border) bg-(--bg) px-2 py-1 text-xs text-(--fg) placeholder-(--dim) outline-none focus:border-(--accent)"
             />
           </div>
           <div className="max-h-72 overflow-y-auto p-1">
@@ -1811,7 +1976,7 @@ function ModelPicker({
                       setOpen(false);
                       setFilter("");
                     }}
-                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-(--bg) ${
+                    className={`flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-(--bg) ${
                       isActive ? "bg-(--bg)" : ""
                     }`}
                   >

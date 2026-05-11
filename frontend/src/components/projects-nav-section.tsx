@@ -3,21 +3,21 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import {
-  ChatIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   CloseIcon,
   EyeOffIcon,
   Folder,
   FolderOpen,
   MoreIcon,
   PinIcon,
-  PinSlashIcon,
   PlusIcon,
   TrashIcon,
 } from "@/components/icons";
 import { Button, UiModal, UiModalHeader } from "@/components/ui-kit";
 import { safeJson } from "@/lib/agent/safe-json";
+import {
+  mergeActiveAgentSessions,
+  type ActiveAgentSessionSnapshot,
+} from "@/lib/agent/active-sessions";
 
 type ProjectEntry = {
   id: string;
@@ -64,18 +64,7 @@ export const NEW_AGENT_SESSION_EVENT = "vllm-studio.agent.newSession";
 export const ACTIVE_AGENT_SESSION_RENAME_EVENT = "vllm-studio.agent.activeSessionRename";
 export const ACTIVE_AGENT_SESSION_OPEN_EVENT = "vllm-studio.agent.activeSessionOpen";
 
-type ActiveAgentSession = {
-  projectId: string;
-  cwd: string;
-  paneId: string;
-  tabId: string;
-  piSessionId: string | null;
-  modelId?: string;
-  title: string;
-  status: string;
-  active?: boolean;
-  updatedAt: string;
-};
+type ActiveAgentSession = ActiveAgentSessionSnapshot;
 
 type SessionPref = {
   title?: string;
@@ -102,12 +91,13 @@ function loadActiveAgentSessions(): ActiveAgentSession[] {
 
 function saveActiveAgentSessions(sessions: ActiveAgentSession[]) {
   if (typeof window === "undefined") return;
-  const recoverable = sessions.filter((session) => Boolean(session.piSessionId));
-  if (recoverable.length === 0) {
+  const prefs = loadSessionPrefs();
+  const merged = mergeActiveAgentSessions(loadActiveAgentSessions(), sessions, prefs);
+  if (merged.length > 0) {
+    window.localStorage.setItem(ACTIVE_AGENT_SESSIONS_KEY, JSON.stringify(merged));
+  } else {
     window.localStorage.removeItem(ACTIVE_AGENT_SESSIONS_KEY);
-    return;
   }
-  window.localStorage.setItem(ACTIVE_AGENT_SESSIONS_KEY, JSON.stringify(recoverable));
 }
 
 function setAgentSessionDragData(
@@ -166,6 +156,18 @@ function patchSessionPref(piSessionId: string, patch: SessionPref) {
   saveSessionPrefs(all);
 }
 
+function relativeAge(value?: string | null): string {
+  const timestamp = value ? Date.parse(value) : NaN;
+  if (!Number.isFinite(timestamp)) return "";
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
 function useSessionPrefs() {
   const [prefs, setPrefs] = useState<Record<string, SessionPref>>(() => loadSessionPrefs());
   useEffect(() => {
@@ -219,23 +221,6 @@ export async function loadAgentProjects(): Promise<ProjectEntry[]> {
   const payload = (await response.json()) as { projects?: ProjectEntry[]; error?: string };
   if (!response.ok) throw new Error(payload.error || "Failed to load projects");
   return payload.projects ?? [];
-}
-
-function formatRelative(isoString: string): string {
-  const then = new Date(isoString).getTime();
-  if (!Number.isFinite(then)) return "";
-  const diffMs = Date.now() - then;
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(isoString).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
 }
 
 function ProjectDirectoryPickerModal({
@@ -400,7 +385,12 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
   const [pinnedSessions, setPinnedSessions] = useState<PinnedSession[]>([]);
   const prefs = useSessionPrefs();
   const pinnedActiveSessions = activeSessions
-    .filter((session) => session.piSessionId && prefs[session.piSessionId]?.pinned)
+    .filter(
+      (session) =>
+        session.piSessionId &&
+        prefs[session.piSessionId]?.pinned &&
+        !prefs[session.piSessionId]?.hidden,
+    )
     .map((session) => ({
       session,
       project: projects.find((project) => project.id === session.projectId),
@@ -518,7 +508,9 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
     const onActiveSessions = (event: Event) => {
       const detail = (event as CustomEvent<{ sessions?: ActiveAgentSession[] }>).detail;
       const sessions = Array.isArray(detail?.sessions) ? detail.sessions : [];
-      setActiveSessions(sessions);
+      setActiveSessions((current) =>
+        mergeActiveAgentSessions(current, sessions, loadSessionPrefs()),
+      );
       saveActiveAgentSessions(sessions);
     };
     window.addEventListener(ACTIVE_AGENT_SESSIONS_EVENT, onActiveSessions);
@@ -558,7 +550,11 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
           rows
             .flat()
             .filter((session) => !activePiSessionIds.has(session.id))
-            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+            .sort(
+              (a, b) =>
+                new Date(b.startedAt || b.updatedAt).getTime() -
+                new Date(a.startedAt || a.updatedAt).getTime(),
+            ),
         );
       }
     })();
@@ -581,8 +577,7 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
       />
       {pinnedSessions.length > 0 || pinnedActiveSessions.length > 0 ? (
         <div className="flex flex-col pb-1">
-          <div className="mt-3 flex h-5 items-center gap-1.5 px-2 text-[10px] font-medium uppercase tracking-[0.14em] text-(--dim)/80">
-            <PinIcon className="h-3 w-3" />
+          <div className="mt-5 flex h-7 items-center px-3 text-[12px] font-medium text-(--dim)">
             Pinned
           </div>
           {pinnedActiveSessions.map(({ session, project }) => (
@@ -591,19 +586,6 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
               project={project}
               session={session}
               pref={session.piSessionId ? (prefs[session.piSessionId] ?? {}) : {}}
-              onDelete={async (sessionId) => {
-                const response = await fetch(
-                  `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&id=${encodeURIComponent(sessionId)}`,
-                  { method: "DELETE" },
-                );
-                if (!response.ok) {
-                  const payload = (await safeJson<{ error?: string }>(response).catch(
-                    () => ({}),
-                  )) as { error?: string };
-                  throw new Error(payload.error || "Failed to delete session");
-                }
-                removeSessionPref(sessionId);
-              }}
             />
           ))}
           {pinnedSessions.map((session) => (
@@ -612,40 +594,27 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
               project={session.project}
               session={session}
               pref={prefs[session.id] ?? {}}
-              onDelete={async (sessionId) => {
-                const response = await fetch(
-                  `/api/agent/sessions?cwd=${encodeURIComponent(session.project.path)}&id=${encodeURIComponent(sessionId)}`,
-                  { method: "DELETE" },
-                );
-                if (!response.ok) {
-                  const payload = (await safeJson<{ error?: string }>(response).catch(
-                    () => ({}),
-                  )) as { error?: string };
-                  throw new Error(payload.error || "Failed to delete session");
-                }
-                removeSessionPref(sessionId);
-                setPinnedSessions((current) => current.filter((row) => row.id !== sessionId));
-              }}
             />
           ))}
         </div>
       ) : null}
-      <div className="mt-3 flex h-5 items-center px-2 text-[10px] font-medium uppercase tracking-[0.14em] text-(--dim)/80">
-        Projects
+      <div className="mt-5 flex h-7 items-center justify-between px-3 text-[12px] font-medium text-(--dim)">
+        <span>Projects</span>
+        <button
+          type="button"
+          onClick={handleAddProject}
+          className="rounded p-0.5 text-(--dim) transition-colors hover:text-(--fg)"
+          title="Add folder"
+          aria-label="Add folder"
+        >
+          <PlusIcon className="h-4 w-4" />
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={handleAddProject}
-        className="h-7 flex items-center gap-1.5 px-2 rounded-md text-(--dim) hover:text-(--fg) hover:bg-(--hover) transition-colors"
-      >
-        <PlusIcon className="w-3 h-3 shrink-0" />
-        <span className="truncate text-[12.5px] font-medium">Add project</span>
-      </button>
       {projects.length === 0 ? (
         <button
           type="button"
           onClick={handleAddProject}
-          className="px-3 py-1.5 text-left text-[11px] text-(--dim) hover:text-(--fg)"
+          className="px-3 py-1 text-left text-[13px] text-(--dim) hover:text-(--fg)"
         >
           No projects yet — pick a folder to get started.
         </button>
@@ -685,8 +654,6 @@ function ProjectRow({
   activeSessions: ActiveAgentSession[];
 }) {
   const [missingErrorVisible, setMissingErrorVisible] = useState(false);
-  const Icon = open ? FolderOpen : Folder;
-  const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   const handleToggle = () => {
     if (!project.exists) {
       setMissingErrorVisible(true);
@@ -698,16 +665,26 @@ function ProjectRow({
 
   return (
     <div className="flex flex-col">
-      <div className="group flex h-7 items-center rounded-md text-(--dim) hover:bg-(--hover) hover:text-(--fg) transition-colors">
+      <div className="group relative flex h-8 items-center rounded-md pl-3 pr-2 text-(--dim) transition-colors hover:bg-(--hover) hover:text-(--fg)">
         <button
           type="button"
           onClick={handleToggle}
           title={project.path}
-          className="flex min-w-0 flex-1 items-center gap-1.5 px-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-3 px-0 pr-8 text-left"
         >
-          <Chevron className="w-3 h-3 shrink-0 opacity-70" />
-          <Icon className="w-3.5 h-3.5 shrink-0 opacity-80" />
-          <span className="truncate text-[12.5px] font-medium text-(--fg)">{project.name}</span>
+          <span className="relative h-4 w-4 shrink-0 text-(--dim)">
+            <Folder
+              className={`absolute inset-0 h-4 w-4 transition-all duration-150 ${
+                open ? "scale-90 opacity-0" : "scale-100 opacity-80"
+              }`}
+            />
+            <FolderOpen
+              className={`absolute inset-0 h-4 w-4 transition-all duration-150 ${
+                open ? "scale-100 opacity-80" : "scale-90 opacity-0"
+              }`}
+            />
+          </span>
+          <span className="truncate text-[14px] font-medium text-(--fg)">{project.name}</span>
           {!project.exists ? (
             <span
               className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
@@ -716,6 +693,21 @@ function ProjectRow({
             />
           ) : null}
         </button>
+        <Link
+          href={`/agent?project=${encodeURIComponent(project.id)}&new=1`}
+          onClick={(event) => {
+            if (window.location.pathname !== "/agent") return;
+            event.preventDefault();
+            window.dispatchEvent(
+              new CustomEvent(NEW_AGENT_SESSION_EVENT, { detail: { projectId: project.id } }),
+            );
+          }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-(--dim) opacity-0 hover:text-(--fg) group-hover:opacity-100"
+          title="New chat"
+          aria-label={`New chat in ${project.name}`}
+        >
+          <PlusIcon className="h-4 w-4" />
+        </Link>
         <button
           type="button"
           onClick={(event) => {
@@ -723,15 +715,15 @@ function ProjectRow({
             event.stopPropagation();
             onRemove();
           }}
-          className="mr-2 rounded p-0.5 text-(--dim) opacity-0 hover:bg-(--surface) hover:text-(--err) group-hover:opacity-100"
+          className="absolute right-7 top-1/2 -translate-y-1/2 p-0.5 text-(--dim) opacity-0 hover:text-(--err) group-hover:opacity-100"
           title="Remove from list"
           aria-label="Remove project"
         >
-          <TrashIcon className="h-3 w-3" />
+          <TrashIcon className="h-4 w-4" />
         </button>
       </div>
       {missingErrorVisible && !project.exists ? (
-        <div className="pl-9 pr-3 pb-1 text-[11px] text-red-400">
+        <div className="pl-12 pr-2 pb-1 text-[12px] text-red-400">
           <span>Folder not found at {project.path}</span>
           <button
             type="button"
@@ -742,7 +734,7 @@ function ProjectRow({
           </button>
         </div>
       ) : null}
-      {open && project.exists ? (
+      {(open || activeSessions.length > 0) && project.exists ? (
         <ProjectSessions project={project} activeSessions={activeSessions} />
       ) : null}
     </div>
@@ -785,24 +777,6 @@ function ProjectSessions({
     }
   }, [project.path]);
 
-  const deleteSessionById = useCallback(
-    async (sessionId: string) => {
-      const response = await fetch(
-        `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&id=${encodeURIComponent(sessionId)}`,
-        { method: "DELETE" },
-      );
-      if (!response.ok) {
-        const payload = (await safeJson<{ error?: string }>(response).catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(payload.error || "Failed to delete session");
-      }
-      removeSessionPref(sessionId);
-      setSessions((current) => current?.filter((session) => session.id !== sessionId) ?? current);
-    },
-    [project.path],
-  );
-
   useEffect(() => {
     void reload();
     window.addEventListener(SESSIONS_CHANGED_EVENT, reload);
@@ -843,36 +817,19 @@ function ProjectSessions({
 
   return (
     <div className="flex flex-col">
-      <Link
-        href={`/agent?project=${encodeURIComponent(project.id)}&new=1`}
-        onClick={(event) => {
-          if (window.location.pathname !== "/agent") return;
-          event.preventDefault();
-          window.dispatchEvent(
-            new CustomEvent(NEW_AGENT_SESSION_EVENT, { detail: { projectId: project.id } }),
-          );
-        }}
-        className="h-6 flex items-center gap-1.5 pl-7 pr-2 rounded-md text-(--dim) hover:text-(--fg) hover:bg-(--hover) transition-colors"
-        title="Start a new chat in this project"
-      >
-        <PlusIcon className="w-3 h-3 shrink-0" />
-        <span className="truncate text-[11.5px]">New session</span>
-      </Link>
-
       {visibleActiveSessions.map((session) => (
         <ActiveSessionRow
           key={`${session.paneId}:${session.tabId}`}
           project={project}
           session={session}
           pref={session.piSessionId ? (prefs[session.piSessionId] ?? {}) : {}}
-          onDelete={deleteSessionById}
         />
       ))}
 
       {loading && !sessions ? (
-        <div className="pl-9 pr-3 py-1 text-[11px] text-(--dim)">Loading…</div>
+        <div className="pl-10 pr-4 py-1 text-[13px] text-(--dim)">Loading…</div>
       ) : allRecent.length === 0 && visibleActiveSessions.length === 0 ? (
-        <div className="pl-9 pr-3 py-1 text-[11px] text-(--dim)">No recent sessions</div>
+        <div className="pl-10 pr-4 py-1 text-[13px] text-(--dim)">No chats</div>
       ) : (
         <>
           {recent.map((session) => (
@@ -881,14 +838,13 @@ function ProjectSessions({
               project={project}
               session={session}
               pref={prefs[session.id] ?? {}}
-              onDelete={deleteSessionById}
             />
           ))}
           {hidden.length > 0 ? (
             <button
               type="button"
               onClick={toggleShowHidden}
-              className="h-7 flex items-center gap-2 pl-9 pr-3 text-[10px] text-(--dim) hover:text-(--fg) hover:bg-(--surface)"
+              className="flex h-6 items-center gap-1 pl-10 pr-4 text-[13px] text-(--dim) hover:text-(--fg)"
               title={showHidden ? "Hide hidden sessions" : "Show hidden sessions"}
             >
               <EyeOffIcon className="w-3 h-3 shrink-0" />
@@ -902,7 +858,6 @@ function ProjectSessions({
                   project={project}
                   session={session}
                   pref={prefs[session.id] ?? {}}
-                  onDelete={deleteSessionById}
                 />
               ))
             : null}
@@ -916,18 +871,17 @@ function ActiveSessionRow({
   project,
   session,
   pref,
-  onDelete,
 }: {
   project: ProjectEntry;
   session: ActiveAgentSession;
   pref: SessionPref;
-  onDelete: (sessionId: string) => Promise<void>;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(pref.title ?? session.title ?? "");
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const label = pref.title || session.title || "Current session";
+  const age = relativeAge(session.startedAt ?? session.updatedAt);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -952,16 +906,13 @@ function ActiveSessionRow({
 
   const isRunning = session.status !== "idle" && session.status !== "done";
   const isActive = session.active === true;
-  const rowClass = `group h-7 flex items-center gap-1.5 rounded-md border-l-2 pl-6 pr-2 transition-colors ${
-    isActive
-      ? "border-(--accent)/80 bg-(--active) text-(--fg) hover:bg-(--active)"
-      : "border-transparent text-(--dim) hover:bg-(--hover) hover:text-(--fg)"
+  const rowClass = `group relative flex h-7 items-center gap-1 pl-4 pr-2 transition-colors ${
+    isActive ? "text-(--fg)" : "text-(--dim) hover:text-(--fg)"
   }`;
 
   if (renaming) {
     return (
       <div className={rowClass}>
-        <ChatIcon className="w-3 h-3 shrink-0 text-(--accent)" />
         <input
           autoFocus
           value={draft}
@@ -974,7 +925,7 @@ function ActiveSessionRow({
               setRenaming(false);
             }
           }}
-          className="min-w-0 flex-1 bg-transparent text-xs text-(--fg) outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[13px] text-(--fg) outline-none"
         />
       </div>
     );
@@ -982,29 +933,23 @@ function ActiveSessionRow({
 
   const content = (
     <>
-      <span
-        className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-          isRunning ? "bg-(--hl2) animate-pulse" : "bg-(--dim)"
-        }`}
-        aria-hidden
-        title={isRunning ? `Running: ${session.status}` : "Idle"}
-      />
-      {pref.pinned ? (
-        <PinIcon className="w-3 h-3 shrink-0 text-(--dim)" />
-      ) : (
-        <ChatIcon className="w-3 h-3 shrink-0 text-(--dim)" />
-      )}
-      <span className="min-w-0 flex-1 truncate text-[12px]">{label}</span>
-      {isRunning ? (
-        <span className="shrink-0 truncate text-[10px] text-(--dim)" title={session.status}>
-          {session.status}
-        </span>
+      <span className="min-w-0 flex-1 truncate text-[12px] font-normal leading-7">{label}</span>
+      {age ? (
+        <span className="shrink-0 pl-2 pr-1 font-mono text-[10px] text-(--dim)">{age}</span>
       ) : null}
     </>
   );
 
   return (
     <div className={rowClass}>
+      <SessionPinButton
+        pinned={Boolean(pref.pinned)}
+        disabled={!session.piSessionId}
+        running={isRunning}
+        onToggle={() => {
+          if (session.piSessionId) patchSessionPref(session.piSessionId, { pinned: !pref.pinned });
+        }}
+      />
       {session.piSessionId ? (
         <Link
           href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.piSessionId)}`}
@@ -1016,7 +961,7 @@ function ActiveSessionRow({
             setDraft(pref.title ?? session.title ?? "");
             setRenaming(true);
           }}
-          className="flex min-w-0 flex-1 items-center gap-2"
+          className="flex min-w-0 flex-1 items-center gap-1 pr-5"
         >
           {content}
         </Link>
@@ -1036,36 +981,12 @@ function ActiveSessionRow({
             setDraft(pref.title ?? session.title ?? "");
             setRenaming(true);
           }}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-1 pr-5 text-left"
         >
           {content}
         </button>
       )}
-      {session.piSessionId ? (
-        <Link
-          href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.piSessionId)}&split=1`}
-          className="rounded px-1 text-[10px] text-(--dim) opacity-0 hover:bg-(--bg) hover:text-(--fg) group-hover:opacity-100"
-          title="Open beside focused session"
-        >
-          Split
-        </Link>
-      ) : (
-        <button
-          type="button"
-          onClick={() => {
-            window.dispatchEvent(
-              new CustomEvent(ACTIVE_AGENT_SESSION_OPEN_EVENT, {
-                detail: { paneId: session.paneId, tabId: session.tabId, mode: "split" },
-              }),
-            );
-          }}
-          className="rounded px-1 text-[10px] text-(--dim) opacity-0 hover:bg-(--bg) hover:text-(--fg) group-hover:opacity-100"
-          title="Open beside focused session"
-        >
-          Split
-        </button>
-      )}
-      <div ref={menuRef} className="relative shrink-0">
+      <div ref={menuRef} className="absolute right-2 top-1/2 -translate-y-1/2 shrink-0">
         <button
           type="button"
           onClick={(event) => {
@@ -1073,11 +994,11 @@ function ActiveSessionRow({
             event.stopPropagation();
             setMenuOpen((value) => !value);
           }}
-          className="rounded p-0.5 text-(--dim) opacity-0 hover:bg-(--bg) hover:text-(--fg) group-hover:opacity-100"
+          className="p-0.5 text-(--dim) opacity-0 hover:text-(--fg) group-hover:opacity-100"
           aria-label="Session options"
           title="Session options"
         >
-          <MoreIcon className="h-3 w-3" />
+          <MoreIcon className="h-4 w-4" />
         </button>
         {menuOpen ? (
           <div className="absolute right-0 top-5 z-50 min-w-[150px] rounded-md border border-(--border) bg-(--bg) p-1 text-xs shadow-lg">
@@ -1108,16 +1029,6 @@ function ActiveSessionRow({
             >
               {pref.hidden ? "Unarchive" : "Archive"}
             </SessionMenuItem>
-            <SessionMenuItem
-              onClick={() => {
-                setMenuOpen(false);
-                if (session.piSessionId && window.confirm("Delete this session from disk?")) {
-                  void onDelete(session.piSessionId);
-                }
-              }}
-            >
-              <span className="text-(--err)">Delete</span>
-            </SessionMenuItem>
           </div>
         ) : null}
       </div>
@@ -1129,12 +1040,10 @@ function SessionRow({
   project,
   session,
   pref,
-  onDelete,
 }: {
   project: ProjectEntry;
   session: SessionSummary;
   pref: SessionPref;
-  onDelete: (sessionId: string) => Promise<void>;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(pref.title ?? session.firstUserMessage ?? "");
@@ -1152,6 +1061,7 @@ function SessionRow({
   }, [menuOpen]);
 
   const label = pref.title || session.firstUserMessage || "Untitled session";
+  const age = relativeAge(session.startedAt);
 
   const finishRename = () => {
     const trimmed = draft.trim();
@@ -1161,8 +1071,7 @@ function SessionRow({
 
   if (renaming) {
     return (
-      <div className="h-8 flex items-center gap-2 pl-9 pr-3 bg-(--surface)/60">
-        <ChatIcon className="w-3 h-3 shrink-0 text-(--dim)" />
+      <div className="flex h-7 items-center gap-1 bg-(--surface)/60 pl-4 pr-2">
         <input
           autoFocus
           value={draft}
@@ -1175,7 +1084,7 @@ function SessionRow({
               setRenaming(false);
             }
           }}
-          className="min-w-0 flex-1 bg-transparent text-xs text-(--fg) outline-none"
+          className="min-w-0 flex-1 bg-transparent text-[12px] text-(--fg) outline-none"
         />
       </div>
     );
@@ -1183,12 +1092,16 @@ function SessionRow({
 
   return (
     <div
-      className="group h-6 flex items-center gap-1.5 pl-7 pr-1.5 rounded-md text-(--dim) hover:text-(--fg) hover:bg-(--hover) transition-colors"
+      className="group relative flex h-7 items-center gap-1 pl-4 pr-2 text-(--dim) transition-colors hover:text-(--fg)"
       onContextMenu={(event) => {
         event.preventDefault();
         setMenuOpen(true);
       }}
     >
+      <SessionPinButton
+        pinned={Boolean(pref.pinned)}
+        onToggle={() => patchSessionPref(session.id, { pinned: !pref.pinned })}
+      />
       <Link
         href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}`}
         title={label}
@@ -1201,26 +1114,14 @@ function SessionRow({
             title: label,
           });
         }}
-        className="flex min-w-0 flex-1 items-center gap-2"
+        className="flex min-w-0 flex-1 items-center gap-1 pr-5"
       >
-        {pref.pinned ? (
-          <PinIcon className="w-3 h-3 shrink-0 text-(--accent)" />
-        ) : (
-          <ChatIcon className="w-3 h-3 shrink-0" />
-        )}
-        <span className="min-w-0 flex-1 truncate text-xs">{label}</span>
-        <span className="shrink-0 text-[10px] text-(--dim)">
-          {formatRelative(session.updatedAt)}
-        </span>
+        <span className="min-w-0 flex-1 truncate text-[12px] font-normal leading-7">{label}</span>
+        {age ? (
+          <span className="shrink-0 pl-2 pr-1 font-mono text-[10px] text-(--dim)">{age}</span>
+        ) : null}
       </Link>
-      <div ref={menuRef} className="relative shrink-0">
-        <Link
-          href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}&split=1`}
-          className="rounded px-1 text-[10px] text-(--dim) opacity-0 hover:bg-(--bg) hover:text-(--fg) group-hover:opacity-100"
-          title="Open beside focused session"
-        >
-          Split
-        </Link>
+      <div ref={menuRef} className="absolute right-2 top-1/2 -translate-y-1/2 shrink-0">
         <button
           type="button"
           onClick={(event) => {
@@ -1228,7 +1129,7 @@ function SessionRow({
             event.stopPropagation();
             setMenuOpen((value) => !value);
           }}
-          className="rounded p-0.5 text-(--dim) opacity-0 hover:bg-(--bg) hover:text-(--fg) group-hover:opacity-100"
+          className="p-0.5 text-(--dim) opacity-0 hover:text-(--fg) group-hover:opacity-100"
           aria-label="Session options"
           title="Session options"
         >
@@ -1253,11 +1154,11 @@ function SessionRow({
             >
               {pref.pinned ? (
                 <span className="inline-flex items-center gap-2">
-                  <PinSlashIcon className="h-3 w-3" /> Unpin
+                  <PinIcon className="h-4 w-4" /> Unpin
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-2">
-                  <PinIcon className="h-3 w-3" /> Pin
+                  <PinIcon className="h-4 w-4" /> Pin
                 </span>
               )}
             </SessionMenuItem>
@@ -1268,19 +1169,7 @@ function SessionRow({
               }}
             >
               <span className="inline-flex items-center gap-2">
-                <EyeOffIcon className="h-3 w-3" /> {pref.hidden ? "Unarchive" : "Archive"}
-              </span>
-            </SessionMenuItem>
-            <SessionMenuItem
-              onClick={() => {
-                setMenuOpen(false);
-                if (window.confirm("Delete this session from disk?")) {
-                  void onDelete(session.id);
-                }
-              }}
-            >
-              <span className="inline-flex items-center gap-2 text-(--err)">
-                <TrashIcon className="h-3 w-3" /> Delete
+                <EyeOffIcon className="h-4 w-4" /> {pref.hidden ? "Unarchive" : "Archive"}
               </span>
             </SessionMenuItem>
             {pref.title || pref.pinned || pref.hidden ? (
@@ -1295,7 +1184,7 @@ function SessionRow({
                 }}
               >
                 <span className="inline-flex items-center gap-2 text-(--err)">
-                  <CloseIcon className="h-3 w-3" /> Clear
+                  <CloseIcon className="h-4 w-4" /> Clear
                 </span>
               </SessionMenuItem>
             ) : null}
@@ -1303,6 +1192,38 @@ function SessionRow({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function SessionPinButton({
+  pinned,
+  onToggle,
+  disabled = false,
+  running = false,
+}: {
+  pinned: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+  running?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!disabled) onToggle();
+      }}
+      disabled={disabled}
+      className={`inline-flex h-6 w-4 shrink-0 items-center justify-center transition-opacity hover:text-(--fg) disabled:opacity-20 ${
+        pinned ? "text-(--accent) opacity-100" : "text-(--dim) opacity-60 group-hover:opacity-100"
+      }`}
+      aria-pressed={pinned}
+      aria-label={pinned ? "Unpin session" : "Pin session"}
+      title={pinned ? "Unpin session" : "Pin session"}
+    >
+      <PinIcon className={`h-3.5 w-3.5 ${running ? "animate-pulse" : ""}`} />
+    </button>
   );
 }
 
@@ -1317,7 +1238,7 @@ function SessionMenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="block w-full rounded px-2 py-1 text-left text-xs text-(--fg) hover:bg-(--surface)"
+      className="block w-full px-2 py-1 text-left text-xs text-(--fg) hover:bg-(--surface)"
     >
       {children}
     </button>

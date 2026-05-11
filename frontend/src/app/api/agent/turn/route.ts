@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { listSessions } from "@/lib/agent/sessions-store";
 import { piRuntimeManager } from "@/lib/agent/pi-runtime";
+import { sanitizeComposerPlugins, sanitizeComposerSkills } from "@/lib/agent/composer-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,21 @@ type TurnRequest = {
   // When true, pi-runtime loads the browser extension so the agent can drive
   // the embedded webview via tool calls.
   browserToolEnabled?: boolean;
+  plugins?: Array<{
+    id?: string;
+    name?: string;
+    path?: string;
+    skillPath?: string;
+    mcpConfigPath?: string;
+    appConfigPath?: string;
+    appIds?: string[];
+    appPath?: string;
+  }>;
+  skills?: Array<{
+    id?: string;
+    name?: string;
+    path?: string;
+  }>;
   // Send mode (matches pi-mono RPC): "prompt" runs immediately (or queues with
   // streamingBehavior), "steer" interrupts the current turn between tool
   // executions and the next LLM call, "follow_up" waits for the agent to
@@ -66,9 +82,35 @@ function extractToolCallPath(toolCall: unknown): string | null {
   return null;
 }
 
-function sse(controller: ReadableStreamDefaultController<Uint8Array>, payload: unknown) {
+function sse(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  payload: unknown,
+  streamOpen: () => boolean = () => true,
+) {
+  if (!streamOpen()) return;
   const encoder = new TextEncoder();
-  controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+  try {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+  } catch {
+    // The browser may have navigated away. The Pi runtime must keep running;
+    // callers can reattach through /api/agent/runtime/events.
+  }
+}
+
+function adoptRuntimePiSessionId(session: unknown, piSessionId: string | null | undefined) {
+  const next = piSessionId?.trim();
+  if (!next || !session || typeof session !== "object") return;
+  const runtime = session as {
+    adoptPiSessionId?: (value: string) => void;
+    currentPiSessionId?: string | null;
+  };
+  if (typeof runtime.adoptPiSessionId === "function") {
+    runtime.adoptPiSessionId(next);
+  } else if (!runtime.currentPiSessionId) {
+    // Dev HMR can keep a PiRpcSession instance from the previous module
+    // version alive. Preserve reattach correctness for those sessions too.
+    runtime.currentPiSessionId = next;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -89,6 +131,8 @@ export async function POST(request: NextRequest) {
       ? body.piSessionId.trim()
       : null;
   const browserToolEnabled = body.browserToolEnabled === true;
+  const plugins = sanitizeComposerPlugins(body.plugins);
+  const skills = sanitizeComposerSkills(body.skills);
   const mode: TurnRequest["mode"] =
     body.mode === "steer" || body.mode === "follow_up" ? body.mode : "prompt";
   const streamingBehavior =
@@ -101,6 +145,12 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let open = true;
+      const isOpen = () => open;
+      request.signal.addEventListener("abort", () => {
+        open = false;
+      });
+
       // Auto-verify state for this turn. Populated by intercepting pi events
       // emitted during session.prompt(). The pendingTools map carries the
       // tool name + path between the assistant_message_event (which has args
@@ -144,32 +194,50 @@ export async function POST(request: NextRequest) {
         const turnStartedAt = new Date(Date.now() - 2_000);
         const session = piRuntimeManager.getSession(sessionId);
         const existingStatus = session.status;
+        const promptAlreadyActive = existingStatus.active === true;
+        const controlTargetRunning =
+          existingStatus.active === true || existingStatus.running === true;
         const effectivePiSessionId =
           mode === "prompt"
             ? piSessionId
-            : existingStatus.running
+            : controlTargetRunning
               ? (existingStatus.piSessionId ?? piSessionId)
               : piSessionId;
-        sse(controller, { type: "status", phase: "starting", sessionId, modelId, cwd });
-        await session.ensureStarted(modelId, cwd, effectivePiSessionId, browserToolEnabled);
-        sse(controller, { type: "status", phase: "running", session: session.status });
-        if (mode === "steer") {
+        sse(controller, { type: "status", phase: "starting", sessionId, modelId, cwd }, isOpen);
+        // Control turns are keyed to the Pi process, not to this HTTP stream's
+        // ownership bit. The original prompt stream can detach while Pi keeps
+        // running; if we fall back to `prompt` in that window, steer/queue looks
+        // accepted in the UI but never reaches the active model turn.
+        const ownsPromptStream = mode === "prompt" || !controlTargetRunning;
+        const effectiveStreamingBehavior =
+          mode === "prompt" && promptAlreadyActive
+            ? (streamingBehavior ?? "steer")
+            : streamingBehavior;
+        if (ownsPromptStream) {
+          await session.ensureStarted(modelId, cwd, effectivePiSessionId, {
+            browserToolEnabled,
+            plugins,
+            skills,
+          });
+        }
+        sse(controller, { type: "status", phase: "running", session: session.status }, isOpen);
+        if (ownsPromptStream) {
+          await session.prompt(
+            message,
+            (event, seq) => {
+              observe(event as Record<string, unknown>);
+              sse(controller, { type: "pi", seq, event }, isOpen);
+            },
+            { streamingBehavior: effectiveStreamingBehavior },
+          );
+        } else if (mode === "steer") {
           await session.steer(message);
           // Steer is a fire-and-forget control message — events keep flowing on
           // the original prompt's stream. Close ours immediately.
-          sse(controller, { type: "status", phase: "queued", queue: "steer" });
+          sse(controller, { type: "status", phase: "queued", queue: "steer" }, isOpen);
         } else if (mode === "follow_up") {
           await session.followUp(message);
-          sse(controller, { type: "status", phase: "queued", queue: "follow_up" });
-        } else {
-          await session.prompt(
-            message,
-            (event) => {
-              observe(event as Record<string, unknown>);
-              sse(controller, { type: "pi", event });
-            },
-            { streamingBehavior },
-          );
+          sse(controller, { type: "status", phase: "queued", queue: "follow_up" }, isOpen);
         }
         // Auto-verify safety net: only fires for `prompt` mode. If the agent
         // edited files but never called a verify_* tool, run a second pi
@@ -180,12 +248,16 @@ export async function POST(request: NextRequest) {
           !verifyWasCalled &&
           (dirtyWebPaths.length > 0 || dirtyMobilePaths.length > 0)
         ) {
-          sse(controller, {
-            type: "auto_verify",
-            phase: "injecting",
-            webPaths: dirtyWebPaths,
-            mobilePaths: dirtyMobilePaths,
-          });
+          sse(
+            controller,
+            {
+              type: "auto_verify",
+              phase: "injecting",
+              webPaths: dirtyWebPaths,
+              mobilePaths: dirtyMobilePaths,
+            },
+            isOpen,
+          );
           const lines: string[] = [
             "[vLLM Studio auto-verify] You edited files this turn but did not call any verify_* tool.",
             "Per built-in policy, verify the change now before this turn closes.",
@@ -212,17 +284,21 @@ export async function POST(request: NextRequest) {
             await session.prompt(
               lines.join("\n"),
               (event) => {
-                sse(controller, { type: "pi", event });
+                sse(controller, { type: "pi", event }, isOpen);
               },
               {},
             );
-            sse(controller, { type: "auto_verify", phase: "done" });
+            sse(controller, { type: "auto_verify", phase: "done" }, isOpen);
           } catch (err) {
-            sse(controller, {
-              type: "auto_verify",
-              phase: "error",
-              error: err instanceof Error ? err.message : String(err),
-            });
+            sse(
+              controller,
+              {
+                type: "auto_verify",
+                phase: "error",
+                error: err instanceof Error ? err.message : String(err),
+              },
+              isOpen,
+            );
           }
         }
         const status = session.status;
@@ -231,14 +307,28 @@ export async function POST(request: NextRequest) {
           const recent = await listSessions(status.cwd, { since: turnStartedAt });
           resolvedPiSessionId = recent[0]?.id ?? null;
         }
-        sse(controller, { type: "status", phase: "done", piSessionId: resolvedPiSessionId });
+        adoptRuntimePiSessionId(session, resolvedPiSessionId);
+        sse(
+          controller,
+          { type: "status", phase: "done", piSessionId: resolvedPiSessionId },
+          isOpen,
+        );
       } catch (error) {
-        sse(controller, {
-          type: "error",
-          error: error instanceof Error ? error.message : "Pi agent turn failed",
-        });
+        sse(
+          controller,
+          {
+            type: "error",
+            error: error instanceof Error ? error.message : "Pi agent turn failed",
+          },
+          isOpen,
+        );
       } finally {
-        controller.close();
+        open = false;
+        try {
+          controller.close();
+        } catch {
+          // already closed by client navigation
+        }
       }
     },
   });

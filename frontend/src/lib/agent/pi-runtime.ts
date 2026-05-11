@@ -1,17 +1,19 @@
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { getApiSettings, type ApiSettings } from "@/lib/api-settings";
 import { resolveDataDir } from "@/lib/data-dir";
-import { enhancedPath } from "@/lib/system/spawn";
 import { normalizeOpenAIModels, modelsToPiModels, type AgentModel } from "./models";
+import { isAgentEndEvent } from "./pi-events";
+import { piPathEnv, resolvePiLaunchCommand } from "./pi-binary";
 import { listProjectsFromStore } from "./projects-store";
 
 const PROVIDER_ID = "vllm-studio";
 const DEFAULT_SESSION_ID = "default";
+const RPC_COMMAND_TIMEOUT_MS = 30_000;
 
 type PiResponse = {
   id?: string;
@@ -24,9 +26,38 @@ type PiResponse = {
 
 type PiEvent = Record<string, unknown> & { type?: string };
 
+export type LoggedPiEvent = {
+  seq: number;
+  event: PiEvent;
+  timestamp: string;
+};
+
 type PendingCommand = {
   resolve: (response: PiResponse) => void;
   reject: (error: Error) => void;
+};
+
+type RuntimePluginRef = {
+  id?: string;
+  name?: string;
+  path?: string;
+  skillPath?: string;
+  mcpConfigPath?: string;
+  appConfigPath?: string;
+  appIds?: string[];
+  appPath?: string;
+};
+
+type RuntimeSkillRef = {
+  id?: string;
+  name?: string;
+  path?: string;
+};
+
+type RuntimeStartOptions = {
+  browserToolEnabled?: boolean;
+  plugins?: RuntimePluginRef[];
+  skills?: RuntimeSkillRef[];
 };
 
 function normalizeBackendUrl(value: string): string {
@@ -76,87 +107,186 @@ async function resolveAgentCwd(input?: string): Promise<string> {
   return resolved;
 }
 
-// Locate the compiled browser extension.
-// In production Electron sets VLLM_STUDIO_PI_EXTENSION_BROWSER_PATH.
-// In dev we fall back to a single deterministic repo-relative path.
-function resolveBrowserExtensionPath(): string | null {
-  const envPath = process.env.VLLM_STUDIO_PI_EXTENSION_BROWSER_PATH;
-  if (envPath) return envPath;
-
-  if (process.env.NODE_ENV !== "production") {
-    const devPath = path.resolve(
-      process.cwd(),
-      "desktop",
-      "resources",
-      "pi-extensions",
-      "dist",
-      "browser.js",
-    );
-    if (existsSync(devPath)) return devPath;
+// Locate bundled Pi extensions. In dev they sit next to the source files;
+// in a packaged Electron app they ship under
+// process.resourcesPath/desktop/resources/pi-extensions/. We accept either.
+function resolveBundledPiExtensionPath(fileName: string, envOverride?: string): string | null {
+  const candidates = [
+    envOverride,
+    process.resourcesPath
+      ? path.join(process.resourcesPath, "desktop", "resources", "pi-extensions", fileName)
+      : null,
+    path.resolve(process.cwd(), "frontend", "desktop", "resources", "pi-extensions", fileName),
+    path.resolve(process.cwd(), "desktop", "resources", "pi-extensions", fileName),
+    path.resolve(process.cwd(), "desktop", "resources", "pi-extensions", "dist", fileName),
+  ].filter((value): value is string => Boolean(value));
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
   }
 
   return null;
 }
 
-// Locate the compiled mobile extension.
+// Locate the mobile extension (mobile-mcp tools; no-ops without devices).
 function resolveMobileExtensionPath(): string | null {
-  const envPath = process.env.VLLM_STUDIO_PI_EXTENSION_MOBILE_PATH;
-  if (envPath) return envPath;
-
-  if (process.env.NODE_ENV !== "production") {
-    const devPath = path.resolve(
-      process.cwd(),
-      "desktop",
-      "resources",
-      "pi-extensions",
-      "dist",
-      "mobile.js",
-    );
-    if (existsSync(devPath)) return devPath;
-  }
-
-  return null;
+  return (
+    resolveBundledPiExtensionPath("mobile.ts", process.env.VLLM_STUDIO_PI_EXTENSION_MOBILE_PATH) ??
+    resolveBundledPiExtensionPath("mobile.js")
+  );
 }
 
-// Locate the compiled verify extension.
+// Locate the built-in verify extension (agent-side post-edit verification).
 function resolveVerifyExtensionPath(): string | null {
-  const envPath = process.env.VLLM_STUDIO_PI_EXTENSION_VERIFY_PATH;
-  if (envPath) return envPath;
+  return (
+    resolveBundledPiExtensionPath("verify.ts", process.env.VLLM_STUDIO_PI_EXTENSION_VERIFY_PATH) ??
+    resolveBundledPiExtensionPath("verify.js")
+  );
+}
 
-  if (process.env.NODE_ENV !== "production") {
-    const devPath = path.resolve(
-      process.cwd(),
-      "desktop",
-      "resources",
-      "pi-extensions",
-      "dist",
-      "verify.js",
-    );
-    if (existsSync(devPath)) return devPath;
+function resolveBrowserExtensionPath(): string | null {
+  return resolveBundledPiExtensionPath(
+    "browser.ts",
+    process.env.VLLM_STUDIO_BROWSER_EXTENSION_PATH,
+  );
+}
+
+function resolveTimeoutExtensionPath(): string | null {
+  return resolveBundledPiExtensionPath(
+    "vllm-studio-timeouts.ts",
+    process.env.VLLM_STUDIO_TIMEOUT_EXTENSION_PATH,
+  );
+}
+
+function resolveMcpExtensionPath(): string | null {
+  return resolveBundledPiExtensionPath("mcp-plugin.ts", process.env.VLLM_STUDIO_MCP_EXTENSION_PATH);
+}
+
+function pluginNameMatches(plugin: RuntimePluginRef, needle: string): boolean {
+  return [
+    plugin.id,
+    plugin.name,
+    plugin.path,
+    plugin.skillPath,
+    plugin.mcpConfigPath,
+    plugin.appConfigPath,
+    plugin.appPath,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .some((value) => value.toLowerCase().includes(needle));
+}
+
+function pluginFingerprint(options: RuntimeStartOptions): string {
+  const names = (options.plugins ?? [])
+    .map(
+      (plugin) =>
+        `${plugin.name ?? ""}:${plugin.path ?? ""}:${plugin.skillPath ?? ""}:${plugin.mcpConfigPath ?? ""}:${plugin.appConfigPath ?? ""}:${plugin.appIds?.join(",") ?? ""}:${plugin.appPath ?? ""}`,
+    )
+    .sort();
+  const skills = (options.skills ?? [])
+    .map((skill) => `${skill.name ?? ""}:${skill.path ?? ""}`)
+    .sort();
+  return JSON.stringify({
+    browser: options.browserToolEnabled === true,
+    plugins: names,
+    skills,
+  });
+}
+
+function resolveComputerUseApp(plugins: RuntimePluginRef[]): string | null {
+  const selected = plugins.find((plugin) => pluginNameMatches(plugin, "computer-use"));
+  const candidates = [
+    selected?.appPath,
+    selected?.path && !selected.path.endsWith(".app")
+      ? path.join(selected.path, "Codex Computer Use.app")
+      : null,
+    selected?.path,
+    "/Applications/Codex.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use/Codex Computer Use.app",
+    path.join(homedir(), ".codex", "computer-use", "Codex Computer Use.app"),
+  ].filter((value): value is string => Boolean(value));
+  return (
+    candidates.find((candidate) => candidate.endsWith(".app") && existsSync(candidate)) ?? null
+  );
+}
+
+function launchComputerUseApp(plugins: RuntimePluginRef[]) {
+  if (process.platform !== "darwin") return;
+  const appPath = resolveComputerUseApp(plugins);
+  if (!appPath) return;
+  const child = spawn("open", ["-gj", appPath], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+}
+
+function pluginSkillPaths(plugins: RuntimePluginRef[]): string[] {
+  return uniqueExistingPaths(
+    plugins.flatMap((plugin) => [
+      plugin.skillPath,
+      plugin.path && !plugin.path.endsWith(".app") ? path.join(plugin.path, "skills") : null,
+    ]),
+  );
+}
+
+function selectedSkillPaths(skills: RuntimeSkillRef[]): string[] {
+  return uniqueExistingPaths(skills.map((skill) => skill.path));
+}
+
+function uniqueExistingPaths(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  return values.filter((value): value is string => {
+    if (!value || !existsSync(value)) return false;
+    const resolved = path.resolve(value);
+    if (seen.has(resolved)) return false;
+    seen.add(resolved);
+    return true;
+  });
+}
+
+function isLaunchConstrainedComputerUseMcp(configPath: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as {
+      mcpServers?: Record<string, { command?: unknown; args?: unknown }>;
+    };
+    return Object.entries(parsed.mcpServers ?? {}).some(([name, server]) => {
+      const marker =
+        `${name} ${String(server.command ?? "")} ${Array.isArray(server.args) ? server.args.join(" ") : ""}`.toLowerCase();
+      return marker.includes("computer-use") || marker.includes("skycomputeruseclient");
+    });
+  } catch {
+    return false;
   }
+}
 
-  return null;
+function shouldLoadMcpConfig(plugin: RuntimePluginRef, configPath: string): boolean {
+  if (process.env.VLLM_STUDIO_ENABLE_CODEX_COMPUTER_USE_MCP === "1") return true;
+  return !(
+    pluginNameMatches(plugin, "computer-use") && isLaunchConstrainedComputerUseMcp(configPath)
+  );
+}
+
+function pluginMcpConfigs(
+  plugins: RuntimePluginRef[],
+): Array<{ pluginName: string; configPath: string }> {
+  const seen = new Set<string>();
+  return plugins.flatMap((plugin) => {
+    const configPath =
+      plugin.mcpConfigPath ??
+      (plugin.path && !plugin.path.endsWith(".app") ? path.join(plugin.path, ".mcp.json") : null);
+    if (!configPath || !existsSync(configPath)) return [];
+    const resolved = path.resolve(configPath);
+    if (!shouldLoadMcpConfig(plugin, resolved)) return [];
+    if (seen.has(resolved)) return [];
+    seen.add(resolved);
+    return [
+      { pluginName: plugin.name || path.basename(path.dirname(resolved)), configPath: resolved },
+    ];
+  });
 }
 
 function deriveFrontendBase(): string {
   const port = process.env.PORT || "3000";
   return `http://127.0.0.1:${port}`;
-}
-
-function piBinaryPath(): string {
-  const local = path.join(
-    process.cwd(),
-    "node_modules",
-    ".bin",
-    process.platform === "win32" ? "pi.cmd" : "pi",
-  );
-  if (existsSync(local)) return local;
-  return "pi";
-}
-
-function piPathEnv(): string {
-  const bunDir = path.join(homedir(), ".bun", "bin");
-  return [bunDir, enhancedPath()].filter(Boolean).join(path.delimiter);
 }
 
 async function fetchModelsFromBackend(settings: ApiSettings): Promise<AgentModel[]> {
@@ -231,24 +361,29 @@ class PiRpcSession extends EventEmitter {
   private currentCwd = "";
   private currentPiSessionId: string | null = null;
   private agentDir = "";
+  private eventSeq = 0;
+  private eventLog: LoggedPiEvent[] = [];
+  private activePromptCount = 0;
+  private lastError: string | null = null;
 
-  private currentBrowserToolEnabled = false;
+  private currentPluginFingerprint = "";
 
   async ensureStarted(
     modelId: string,
     cwd?: string,
     piSessionId?: string | null,
-    browserToolEnabled = false,
+    options: RuntimeStartOptions = {},
   ): Promise<void> {
     const resolvedCwd = await resolveAgentCwd(cwd);
     const desiredSessionId = piSessionId ?? null;
+    const desiredPluginFingerprint = pluginFingerprint(options);
     const matches =
       this.process &&
       !this.process.killed &&
       this.currentModelId === modelId &&
       this.currentCwd === resolvedCwd &&
       this.currentPiSessionId === desiredSessionId &&
-      this.currentBrowserToolEnabled === browserToolEnabled;
+      this.currentPluginFingerprint === desiredPluginFingerprint;
     if (matches) return;
 
     if (this.starting) await this.starting;
@@ -258,14 +393,12 @@ class PiRpcSession extends EventEmitter {
       this.currentModelId === modelId &&
       this.currentCwd === resolvedCwd &&
       this.currentPiSessionId === desiredSessionId &&
-      this.currentBrowserToolEnabled === browserToolEnabled;
+      this.currentPluginFingerprint === desiredPluginFingerprint;
     if (matchesAfter) return;
 
-    this.starting = this.start(modelId, resolvedCwd, desiredSessionId, browserToolEnabled).finally(
-      () => {
-        this.starting = null;
-      },
-    );
+    this.starting = this.start(modelId, resolvedCwd, desiredSessionId, options).finally(() => {
+      this.starting = null;
+    });
     await this.starting;
   }
 
@@ -273,9 +406,13 @@ class PiRpcSession extends EventEmitter {
     modelId: string,
     cwd: string,
     piSessionId: string | null,
-    browserToolEnabled: boolean,
+    options: RuntimeStartOptions,
   ): Promise<void> {
     await this.stop();
+    this.eventSeq = 0;
+    this.eventLog = [];
+    this.activePromptCount = 0;
+    this.lastError = null;
     const { models, agentDir } = await refreshPiModels();
     const selectedModel = models.find((model) => model.id === modelId);
     if (!selectedModel) {
@@ -285,7 +422,15 @@ class PiRpcSession extends EventEmitter {
     this.currentModelId = modelId;
     this.currentCwd = cwd;
     this.currentPiSessionId = piSessionId;
-    this.currentBrowserToolEnabled = browserToolEnabled;
+    this.currentPluginFingerprint = pluginFingerprint(options);
+    const plugins = options.plugins ?? [];
+    const skills = options.skills ?? [];
+    const shouldLoadBrowserTool =
+      options.browserToolEnabled === true ||
+      plugins.some(
+        (plugin) =>
+          pluginNameMatches(plugin, "browser-use") || pluginNameMatches(plugin, "computer-use"),
+      );
 
     const args = [
       "--mode",
@@ -303,10 +448,24 @@ class PiRpcSession extends EventEmitter {
       // resolves it within the current cwd's session directory.
       args.push("--session", piSessionId);
     }
-    if (browserToolEnabled) {
+    for (const skillPath of uniqueExistingPaths([
+      ...pluginSkillPaths(plugins),
+      ...selectedSkillPaths(skills),
+    ])) {
+      args.push("--skill", skillPath);
+    }
+    const mcpConfigs = pluginMcpConfigs(plugins);
+    const timeoutExtensionPath = resolveTimeoutExtensionPath();
+    if (timeoutExtensionPath) args.push("--extension", timeoutExtensionPath);
+    if (mcpConfigs.length) {
+      const mcpExtensionPath = resolveMcpExtensionPath();
+      if (mcpExtensionPath) args.push("--extension", mcpExtensionPath);
+    }
+    if (shouldLoadBrowserTool) {
       const extensionPath = resolveBrowserExtensionPath();
       if (extensionPath) args.push("--extension", extensionPath);
     }
+    launchComputerUseApp(plugins);
 
     // Always load mobile extension if available - tools are no-ops without devices
     const mobileExtensionPath = resolveMobileExtensionPath();
@@ -321,7 +480,8 @@ class PiRpcSession extends EventEmitter {
     // to call verify_web / verify_mobile / verify_until_pass.
     args.push("--append-system-prompt", VERIFY_PROMPT_ADDENDUM);
 
-    const child = spawn(piBinaryPath(), args, {
+    const launch = resolvePiLaunchCommand();
+    const child = spawn(launch.command, [...launch.argsPrefix, ...args], {
       cwd,
       env: {
         ...process.env,
@@ -331,6 +491,7 @@ class PiRpcSession extends EventEmitter {
         // The browser extension uses this base URL to call back into the
         // frontend's /api/agent/browser/* endpoints.
         VLLM_STUDIO_FRONTEND_BASE: process.env.VLLM_STUDIO_FRONTEND_BASE ?? deriveFrontendBase(),
+        VLLM_STUDIO_MCP_PLUGIN_CONFIGS: JSON.stringify(mcpConfigs),
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -340,10 +501,10 @@ class PiRpcSession extends EventEmitter {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.handleStdout(chunk));
     child.stderr.on("data", (chunk: string) => {
-      this.emit("event", { type: "stderr", text: chunk });
+      this.recordEvent({ type: "stderr", text: chunk });
     });
     child.on("exit", (code, signal) => {
-      this.emit("event", { type: "process_exit", code, signal });
+      this.recordEvent({ type: "process_exit", code, signal });
       for (const pending of this.pending.values()) {
         pending.reject(new Error(`pi rpc exited before response (code=${code}, signal=${signal})`));
       }
@@ -377,7 +538,7 @@ class PiRpcSession extends EventEmitter {
     try {
       parsed = JSON.parse(raw) as PiResponse | PiEvent;
     } catch {
-      this.emit("event", { type: "stdout", text: raw });
+      this.recordEvent({ type: "stdout", text: raw });
       return;
     }
 
@@ -410,7 +571,19 @@ class PiRpcSession extends EventEmitter {
       }
     }
 
-    this.emit("event", parsed);
+    this.recordEvent(parsed);
+  }
+
+  private recordEvent(event: PiEvent) {
+    const logged: LoggedPiEvent = {
+      seq: ++this.eventSeq,
+      event,
+      timestamp: new Date().toISOString(),
+    };
+    this.eventLog.push(logged);
+    if (this.eventLog.length > 2_000) this.eventLog.splice(0, this.eventLog.length - 2_000);
+    this.emit("loggedEvent", logged);
+    this.emit("event", event);
   }
 
   private sendCommand(command: Record<string, unknown>): Promise<PiResponse> {
@@ -421,10 +594,24 @@ class PiRpcSession extends EventEmitter {
     const payload = { id, ...command };
     const line = `${JSON.stringify(payload)}\n`;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Timed out waiting for pi rpc command '${String(command.type ?? id)}'`));
+      }, RPC_COMMAND_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (response) => {
+          clearTimeout(timeout);
+          resolve(response);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
       this.process?.stdin.write(line, (error) => {
         if (error) {
           this.pending.delete(id);
+          clearTimeout(timeout);
           reject(error);
         }
       });
@@ -438,11 +625,13 @@ class PiRpcSession extends EventEmitter {
    */
   async prompt(
     message: string,
-    onEvent: (event: PiEvent) => void,
+    onEvent: (event: PiEvent, seq: number) => void,
     options: { streamingBehavior?: "steer" | "followUp" } = {},
   ): Promise<void> {
-    const listener = (event: PiEvent) => onEvent(event);
-    this.on("event", listener);
+    const listener = (logged: LoggedPiEvent) => onEvent(logged.event, logged.seq);
+    this.on("loggedEvent", listener);
+    this.activePromptCount += 1;
+    this.lastError = null;
     let settleDone: (() => void) | null = null;
     let settleError: ((error: Error) => void) | null = null;
     const donePromise = new Promise<void>((resolve, reject) => {
@@ -454,7 +643,7 @@ class PiRpcSession extends EventEmitter {
       30 * 60_000,
     );
     const done = (event: PiEvent) => {
-      if (event.type === "agent_end" || event.type === "turn_end") {
+      if (isAgentEndEvent(event)) {
         clearTimeout(timeout);
         this.off("event", done);
         settleDone?.();
@@ -477,10 +666,14 @@ class PiRpcSession extends EventEmitter {
       }
       await this.sendCommand(command);
       await donePromise;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
     } finally {
+      this.activePromptCount = Math.max(0, this.activePromptCount - 1);
       clearTimeout(timeout);
       this.off("event", done);
-      this.off("event", listener);
+      this.off("loggedEvent", listener);
     }
   }
 
@@ -496,6 +689,22 @@ class PiRpcSession extends EventEmitter {
 
   async followUp(message: string): Promise<void> {
     await this.sendCommand({ type: "follow_up", message });
+  }
+
+  adoptPiSessionId(piSessionId: string | null | undefined): void {
+    const next = piSessionId?.trim();
+    if (next && !this.currentPiSessionId) this.currentPiSessionId = next;
+  }
+
+  async compact(customInstructions?: string): Promise<unknown> {
+    if (this.activePromptCount > 0) {
+      throw new Error("Cannot compact while the agent is running.");
+    }
+    const response = await this.sendCommand({
+      type: "compact",
+      ...(customInstructions ? { customInstructions } : {}),
+    });
+    return response.data;
   }
 
   async abort(): Promise<void> {
@@ -519,13 +728,48 @@ class PiRpcSession extends EventEmitter {
   }
 
   get status() {
+    const running = Boolean(this.process && !this.process.killed);
+    const lastTurnEvent = [...this.eventLog].reverse().find((entry) => {
+      const type = String(entry.event.type ?? "");
+      return (
+        type === "agent_start" ||
+        type === "turn_start" ||
+        type === "message_start" ||
+        type === "message_update" ||
+        type === "message_end" ||
+        type === "tool_execution_start" ||
+        type === "tool_execution_update" ||
+        type === "tool_execution_end" ||
+        type === "turn_end" ||
+        type === "agent_end" ||
+        type === "process_exit"
+      );
+    });
+    const eventLooksActive =
+      running &&
+      lastTurnEvent &&
+      !isAgentEndEvent(lastTurnEvent.event) &&
+      lastTurnEvent.event.type !== "process_exit";
     return {
-      running: Boolean(this.process && !this.process.killed),
+      running,
+      active: this.activePromptCount > 0 || Boolean(eventLooksActive),
       modelId: this.currentModelId,
       cwd: this.currentCwd,
       piSessionId: this.currentPiSessionId,
       agentDir: this.agentDir,
+      eventSeq: this.eventSeq,
+      lastError: this.lastError,
     };
+  }
+
+  getEventsAfter(seq: number): LoggedPiEvent[] {
+    const floor = Number.isFinite(seq) ? Math.max(0, Math.trunc(seq)) : 0;
+    return this.eventLog.filter((entry) => entry.seq > floor);
+  }
+
+  onLoggedEvent(listener: (event: LoggedPiEvent) => void) {
+    this.on("loggedEvent", listener);
+    return () => this.off("loggedEvent", listener);
   }
 }
 

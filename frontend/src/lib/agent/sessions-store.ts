@@ -1,5 +1,4 @@
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { createReadStream, existsSync, realpathSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import readline from "node:readline";
@@ -23,6 +22,11 @@ type ListSessionsOptions = {
   since?: Date;
 };
 
+function summaryStartTime(session: Pick<SessionSummary, "startedAt" | "updatedAt">): number {
+  const value = Date.parse(session.startedAt || session.updatedAt);
+  return Number.isFinite(value) ? value : 0;
+}
+
 // Pi encodes the cwd by stripping the leading '/' and replacing remaining '/'
 // with '-', then wrapping with '--' on both sides. Example:
 //   /Users/sero/projects/vllm-studio  →  --Users-sero-projects-vllm-studio--
@@ -41,9 +45,24 @@ function piSessionRoots(): string[] {
   return [...new Set(roots.map((root) => path.resolve(root)))];
 }
 
+function cwdVariants(cwd: string): string[] {
+  const variants = [path.resolve(cwd)];
+  try {
+    variants.push(realpathSync.native(cwd));
+  } catch {
+    try {
+      variants.push(realpathSync(cwd));
+    } catch {
+      // If the cwd no longer exists, fall back to the lexical path. Old
+      // session loading should remain best-effort instead of throwing.
+    }
+  }
+  return [...new Set(variants.map((value) => path.resolve(value)))];
+}
+
 function sessionsDirsForCwd(cwd: string): string[] {
-  const encoded = encodeCwdForPi(cwd);
-  return piSessionRoots().map((root) => path.join(root, encoded));
+  const encodedCwds = [...new Set(cwdVariants(cwd).map(encodeCwdForPi))];
+  return piSessionRoots().flatMap((root) => encodedCwds.map((encoded) => path.join(root, encoded)));
 }
 
 async function readSessionSummary(
@@ -151,19 +170,23 @@ export async function listSessions(
     }
   }
   const summaries = [...summariesById.values()];
-  summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  summaries.sort((a, b) => summaryStartTime(b) - summaryStartTime(a));
   return summaries;
 }
 
 function findSessionFile(cwd: string, sessionId: string): string | null {
+  const matches: Array<{ filepath: string; mtime: number }> = [];
   for (const dir of sessionsDirsForCwd(cwd)) {
     if (!existsSync(dir)) continue;
-    const match = readdirSync(dir).find(
-      (name) => name.endsWith(".jsonl") && (name.includes(sessionId) || name.startsWith(sessionId)),
-    );
-    if (match) return path.join(dir, match);
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".jsonl") || (!name.includes(sessionId) && !name.startsWith(sessionId))) {
+        continue;
+      }
+      const filepath = path.join(dir, name);
+      matches.push({ filepath, mtime: statSync(filepath).mtimeMs });
+    }
   }
-  return null;
+  return matches.sort((a, b) => b.mtime - a.mtime)[0]?.filepath ?? null;
 }
 
 // Stream-load every event from a session JSONL. Used to replay a past
@@ -184,11 +207,4 @@ export async function loadSession(cwd: string, sessionId: string): Promise<Sessi
     }
   }
   return events;
-}
-
-export async function deleteSession(cwd: string, sessionId: string): Promise<boolean> {
-  const filepath = findSessionFile(cwd, sessionId);
-  if (!filepath) return false;
-  await unlink(filepath);
-  return true;
 }
