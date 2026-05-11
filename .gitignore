@@ -93,6 +93,9 @@ scripts/*.local.sh
 # Reference-only copy of the previous controller (superseded by controller/)
 controller-legacy/
 
+# Task monitor state auto-generated files
+tasks/.monitor-state.json
+
 # Sensitive data - do not commit specific IPs or domains
 # Use environment variables or config files instead
 refactory/
