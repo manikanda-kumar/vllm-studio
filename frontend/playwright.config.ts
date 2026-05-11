@@ -30,6 +30,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
+  globalSetup: "./tests/electron/setup.ts",
   projects: [
     {
       name: "browser",
@@ -39,7 +40,6 @@ export default defineConfig({
       name: "electron",
       testDir: "./tests/electron",
       timeout: 120_000,
-      globalSetup: "./tests/electron/setup.ts",
     },
   ],
 });

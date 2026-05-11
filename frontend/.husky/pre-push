@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Fast feedback loop before push. Bypass: --no-verify (only with explicit user consent).
+
+cd frontend || exit 1
+echo "[pre-push] running verify..."
+npm run verify
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+  echo "[pre-push] verify FAILED. Fix issues or use 'git push --no-verify' with caution."
+  exit $STATUS
+fi

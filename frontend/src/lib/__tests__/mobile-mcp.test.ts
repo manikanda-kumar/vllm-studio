@@ -109,7 +109,6 @@ describe("MobileMcpClient", () => {
   });
 
   it("ensureReady resets stale client when ping fails", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const client = new MobileMcpClient();
 
     // First connect succeeds
