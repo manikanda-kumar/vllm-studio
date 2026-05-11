@@ -50,7 +50,7 @@ const allTabs = [
   { href: "/agent", label: "Agent", icon: Bot, liteMode: true },
   { href: "/recipes", label: "Models", icon: HardDrive, liteMode: false },
   { href: "/logs", label: "Server", icon: Server, liteMode: false },
-  { href: "/configs", label: "Settings", icon: Settings, liteMode: true },
+  { href: "/settings", label: "Settings", icon: Settings, liteMode: true },
 ];
 
 function LogoMark() {
@@ -83,6 +83,9 @@ function LogoMark() {
 function isRouteActive(pathname: string, href: string): boolean {
   if (href === "/") {
     return pathname === "/" || pathname === "/discover";
+  }
+  if (href === "/settings") {
+    return pathname.startsWith("/settings") || pathname.startsWith("/configs");
   }
   return pathname.startsWith(href);
 }
