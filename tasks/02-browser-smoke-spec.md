@@ -57,13 +57,13 @@ echo "PASS no-flake-3x"
 
 ## PASS criteria
 
-- [ ] All specs in `app-shell.spec.ts` green
-- [ ] Console error allow-list documented with reasons
-- [ ] Screenshots saved per route under `test-artifacts/02-shell/`
-- [ ] Redirect `/configs` → `/settings` asserted
-- [ ] No flakes across 3 runs
-- [ ] Added `data-testid` count ≤ 5; each justified
-- [ ] No lint/type errors
+- [x] All specs in `app-shell.spec.ts` green
+- [x] Console error allow-list documented with reasons
+- [x] Screenshots saved per route under `test-artifacts/02-shell/`
+- [x] Redirect `/configs` → `/settings` asserted
+- [x] No flakes across 3 runs
+- [x] Added `data-testid` count ≤ 5; each justified
+- [x] No lint/type errors
 
 ## Notes
 
@@ -73,3 +73,13 @@ echo "PASS no-flake-3x"
 - Screenshots saved per route under `test-artifacts/02-shell/`.
 - 3× flake check passed consistently (14–18s per run).
 - Lint clean; no new TypeScript errors in new files.
+
+### Review — 2026-05-11T08:19Z (auto)
+
+- ✅ `frontend/tests/e2e/app-shell.spec.ts` exists
+- ✅ Screenshots dir `test-artifacts/02-shell/` created
+- ✅ Console allow-list documented inline (WebSocket retry, ResizeObserver, 404s, EventSource MIME, JSON parse)
+- ✅ Lite-mode reset in beforeEach noted (default `true` in store — easy regression source, well caught)
+- ✅ `data-testid` additions = 1 (under cap of 5)
+- ✅ 3× flake check passed
+- **PASS confirmed.** Watch for: if controller comes online in CI, allow-list entries for JSON parse on `/api/*` may need narrowing.

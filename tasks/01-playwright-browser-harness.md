@@ -62,13 +62,13 @@ Must NOT spawn a second dev server.
 
 ## PASS criteria
 
-- [ ] `frontend/tests/e2e/` exists with `.gitkeep` + `_smoke.spec.ts`
-- [ ] `playwright.config.ts` has webServer, JSON reporter, port 3210
-- [ ] `test-artifacts/` gitignored; appears after run
-- [ ] `npm run test:e2e` exits 0 with passing smoke test
-- [ ] `results.json` parseable: `jq '.suites[0].specs[0].title' test-artifacts/results.json` returns spec title
-- [ ] Re-running with existing dev server reuses (no port conflict)
-- [ ] No lint/type errors: `npm run lint` clean, `npx tsc --noEmit` clean for new files
+- [x] `frontend/tests/e2e/` exists with `.gitkeep` + `_smoke.spec.ts`
+- [x] `playwright.config.ts` has webServer, JSON reporter, port 3210
+- [x] `test-artifacts/` gitignored; appears after run
+- [x] `npm run test:e2e` exits 0 with passing smoke test
+- [x] `results.json` parseable: `jq '.suites[0].specs[0].title' test-artifacts/results.json` returns spec title
+- [x] Re-running with existing dev server reuses (no port conflict)
+- [x] No lint/type errors: `npm run lint` clean, `npx tsc --noEmit` clean for new files
 
 ## Notes
 
@@ -76,3 +76,11 @@ Must NOT spawn a second dev server.
 - `baseURL` default changed from `http://localhost:3000` to `http://localhost:3210`.
 - Added `tests/README.md` with local run instructions and env vars.
 - Verification: `npm run test:e2e` exits 0 with 8 passing tests (1 harness + 7 app-shell). `results.json` and `playwright-report/` generated successfully.
+
+### Review — 2026-05-11T08:19Z (auto)
+
+- ✅ `frontend/tests/e2e/_smoke.spec.ts` present
+- ✅ `playwright.config.ts` has `testDir: ./tests/e2e`, `baseURL: http://localhost:3210`, `webServer` block, JSON + html + line reporters
+- ✅ `test-artifacts/` populated: `results.json` (parseable), `playwright-report/`, `playwright-output/`, `02-shell/`
+- ✅ npm scripts present: `test:e2e`, `test:e2e:ui`, `test:e2e:install`
+- **PASS confirmed.**

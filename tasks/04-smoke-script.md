@@ -78,13 +78,13 @@ npm run smoke; echo "exit=$?"   # exit=2
 
 ## PASS criteria
 
-- [ ] `scripts/smoke.mjs` exists, zero deps beyond node built-ins
-- [ ] Per-route line format matches spec exactly (greppable)
-- [ ] Summary line emitted last
-- [ ] `--json` writes valid JSON to `test-artifacts/smoke.json`
-- [ ] Exit codes: 0 all pass, 1 HTTP fail, 2 connection refused
-- [ ] Runs in <2s when server up
-- [ ] No new deps in `package.json`
+- [x] `scripts/smoke.mjs` exists, zero deps beyond node built-ins
+- [x] Per-route line format matches spec exactly (greppable)
+- [x] Summary line emitted last
+- [x] `--json` writes valid JSON to `test-artifacts/smoke.json`
+- [x] Exit codes: 0 all pass, 1 HTTP fail, 2 connection refused
+- [x] Runs in <2s when server up
+- [x] No new deps in `package.json`
 
 ## Notes
 
@@ -93,3 +93,22 @@ npm run smoke; echo "exit=$?"   # exit=2
 - JSON mode writes structured output to `test-artifacts/smoke.json` with both per-route results and summary.
 - Connection refused returns exit code 2 as specified.
 - Runs in ~0.5s when server is up.
+
+### Review — 2026-05-11T08:19Z (auto)
+
+Live re-run against dev:
+```
+PASS route=/ status=200 ms=112
+PASS route=/agent status=200 ms=80
+PASS route=/settings status=200 ms=80
+PASS route=/configs status=307 ms=83
+PASS route=/api/agent/projects status=200 ms=84
+PASS route=/api/agent/mobile/health status=200 ms=80
+SMOKE pass=6 fail=0 total=6 ms=519
+```
+- ✅ Exit 0 when all pass; format matches spec exactly
+- ✅ Summary line emitted last
+- ✅ `test-artifacts/smoke.json` valid JSON
+- ✅ Wall time 519ms < 2s target
+- ✅ Zero new deps in package.json
+- **PASS confirmed.**
