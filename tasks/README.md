@@ -16,14 +16,14 @@ Multi-layer feedback loop for vllm-studio. Each task self-contained: goal, instr
 |---|------|------|--------|-----------|
 | 01 | Bootstrap Playwright browser e2e harness | [01-playwright-browser-harness.md](01-playwright-browser-harness.md) | `[x]` | — |
 | 02 | Browser smoke spec — app shell + routes | [02-browser-smoke-spec.md](02-browser-smoke-spec.md) | `[x]` | 01 |
-| 03 | Lite-mode + settings e2e spec | [03-lite-mode-settings-spec.md](03-lite-mode-settings-spec.md) | `[ ]` | 02 |
+| 03 | Lite-mode + settings e2e spec | [03-lite-mode-settings-spec.md](03-lite-mode-settings-spec.md) | `[x]` | 02 |
 | 04 | Smoke script with agent-parseable output | [04-smoke-script.md](04-smoke-script.md) | `[x]` | — |
 | 05 | Electron CDP boot flag + dev script | [05-electron-cdp-boot.md](05-electron-cdp-boot.md) | `[x]` | — |
-| 06 | Visual feedback loop skill (agent-browser) | [06-visual-feedback-skill.md](06-visual-feedback-skill.md) | `[ ]` | 05 |
-| 07 | Electron `_electron` Playwright spec | [07-electron-e2e-spec.md](07-electron-e2e-spec.md) | `[ ]` | 05 |
-| 08 | Mobile MCP regression spec | [08-mobile-mcp-spec.md](08-mobile-mcp-spec.md) | `[ ]` | 02 |
-| 09 | Controller integration test (real HTTP) | [09-controller-integration.md](09-controller-integration.md) | `[ ]` | — |
-| 10 | `npm run verify` aggregator + JSON reporter | [10-verify-aggregator.md](10-verify-aggregator.md) | `[ ]` | 02, 04 |
+| 06 | Visual feedback loop skill (agent-browser) | [06-visual-feedback-skill.md](06-visual-feedback-skill.md) | `[x]` | 05 |
+| 07 | Electron `_electron` Playwright spec | [07-electron-e2e-spec.md](07-electron-e2e-spec.md) | `[x]` | 05 |
+| 08 | Mobile MCP regression spec | [08-mobile-mcp-spec.md](08-mobile-mcp-spec.md) | `[x]` | 02 |
+| 09 | Controller integration test (real HTTP) | [09-controller-integration.md](09-controller-integration.md) | `[x]` | — |
+| 10 | `npm run verify` aggregator + JSON reporter | [10-verify-aggregator.md](10-verify-aggregator.md) | `[x]` | 02, 04 |
 | 11 | CI workflow (GitHub Actions) | [11-ci-workflow.md](11-ci-workflow.md) | `[ ]` | 02, 04, 07 |
 | 12 | Pre-push hook wiring | [12-pre-push-hook.md](12-pre-push-hook.md) | `[ ]` | 10 |
 

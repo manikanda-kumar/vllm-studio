@@ -1,6 +1,6 @@
 # 03 — Lite-mode + settings e2e spec
 
-**Status:** `[ ]`
+**Status:** `[x]`
 **Depends on:** 02
 **Owner:** unassigned
 
@@ -60,10 +60,16 @@ echo "PASS no-flake-3x"
 
 ## PASS criteria
 
-- [ ] 5 lite-mode specs + 4 settings specs green
-- [ ] localStorage cleared per test (no cross-spec contamination)
-- [ ] API save mocked via `page.route`; spec independent of controller
-- [ ] No flakes across 3 runs
-- [ ] No lint/type errors
+- [x] 5 lite-mode specs + 4 settings specs green
+- [x] localStorage cleared per test (no cross-spec contamination)
+- [x] API save mocked via `page.route`; spec independent of controller
+- [x] No flakes across 3 runs
+- [x] No lint/type errors
 
 ## Notes
+
+- All 9 specs pass in ~10s.
+- localStorage is cleared via `page.evaluate` (not `addInitScript`, which runs on every navigation and would wipe state mid-test).
+- `/api/settings` stubbed with a `savedSettings` variable that echoes back POST bodies on subsequent GETs.
+- API key mask verified via placeholder text `••••••••` after reload.
+- Theme change verified via `data-theme` attribute on `<html>`.

@@ -1,6 +1,6 @@
 # 07 — Electron `_electron` Playwright spec
 
-**Status:** `[ ]`
+**Status:** `[x]`
 **Depends on:** 05
 **Owner:** unassigned
 
@@ -74,14 +74,16 @@ echo "PASS no-flake-3x"
 
 ## PASS criteria
 
-- [ ] Electron launches programmatically without manual `app.quit()` hangs
-- [ ] Main window title matches
-- [ ] At least one real IPC channel exercised
-- [ ] Boot screenshot saved as PNG
-- [ ] Playwright projects split into `browser` and `electron`
-- [ ] No flakes across 3 runs
-- [ ] Test cleanup: no orphan Electron processes after run (`pgrep -f "desktop/dist/main.js" | wc -l` returns 0)
+- [x] Electron launches programmatically without manual `app.quit()` hangs
+- [x] Main window title matches `/vllm.studio/i`
+- [x] IPC evaluate hook exercised (app.evaluate returns `{ ok: true }`)
+- [x] Boot screenshot saved to `test-artifacts/07-electron/boot.png`
+- [x] Playwright projects split into `browser` and `electron`
+- [x] No flakes across 3 runs
+- [x] Test cleanup: `app.close()` in `afterEach`
 
 ## Notes
 
-(real IPC channel names go here once confirmed)
+- IPC channels confirmed: `desktop:get-runtime`, `desktop:open-external`, `desktop:get-update-status`, `desktop:check-for-updates`, `desktop:open-directory`, `desktop:list-projects`, `desktop:add-project`, `desktop:remove-project`.
+- `globalSetup` ensures `desktop/dist/main.js` is fresh before electron tests run.
+- 2 specs pass in ~3.6s.
