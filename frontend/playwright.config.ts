@@ -9,7 +9,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3210";
  * (see `tests/README.md`). `PLAYWRIGHT_BACKEND_URL` must point at that same process.
  */
 export default defineConfig({
-  testDir: "./tests/e2e",
+  testDir: "./tests",
   timeout: 60_000,
   expect: { timeout: 10_000 },
   use: {
@@ -30,5 +30,17 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
+  projects: [
+    {
+      name: "browser",
+      testDir: "./tests/e2e",
+    },
+    {
+      name: "electron",
+      testDir: "./tests/electron",
+      timeout: 120_000,
+      globalSetup: "./tests/electron/setup.ts",
+    },
+  ],
 });
 

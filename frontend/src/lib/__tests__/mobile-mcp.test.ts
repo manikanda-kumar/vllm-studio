@@ -107,4 +107,36 @@ describe("MobileMcpClient", () => {
     expect(health.version).toBe("0.0.54");
     expect(health.lastError).toBeNull();
   });
+
+  it("ensureReady resets stale client when ping fails", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const client = new MobileMcpClient();
+
+    // First connect succeeds
+    await client.ensureReady();
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+
+    // Now simulate a ping failure on subsequent calls by making connect throw
+    mockConnect.mockRejectedValueOnce(new Error("Connection refused"));
+
+    // The ping inside ensureReady should fail, causing a reconnect attempt
+    await expect(client.ensureReady()).rejects.toThrow("Connection refused");
+    // Should have attempted to reconnect
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("stop closes client and transport gracefully", async () => {
+    const client = new MobileMcpClient();
+    await client.ensureReady();
+
+    const healthBefore = client.getHealth();
+    expect(healthBefore.ready).toBe(true);
+
+    await client.stop();
+
+    const healthAfter = client.getHealth();
+    expect(healthAfter.ready).toBe(false);
+    expect(healthAfter.toolCount).toBe(0);
+    expect(mockClose).toHaveBeenCalled();
+  });
 });

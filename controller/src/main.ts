@@ -36,18 +36,15 @@ const checkNvidiaSmi = (logger: Logger): void => {
   }
 };
 
-const context = createAppContext();
-checkNvidiaSmi(context.logger);
-const app = createApp(context);
-const stopMetrics = startMetricsCollector(context);
+export async function startTestServer(opts?: { port?: number }): Promise<{ url: string; close: () => Promise<void> }> {
+  const context = createAppContext();
+  checkNvidiaSmi(context.logger);
+  const app = createApp(context);
+  const stopMetrics = startMetricsCollector(context);
 
-/**
- * Start the Bun server.
- * @returns Promise that resolves when started.
- */
-const run = async (): Promise<void> => {
+  const port = opts?.port ?? context.config.port;
   const server = Bun.serve({
-    port: context.config.port,
+    port,
     hostname: context.config.host,
     fetch: app.fetch,
     idleTimeout: 120,
@@ -55,16 +52,24 @@ const run = async (): Promise<void> => {
 
   context.logger.info(`Controller listening on ${context.config.host}:${server.port}`);
 
+  return {
+    url: `http://${context.config.host}:${server.port}`,
+    close: async () => {
+      stopMetrics();
+      if (typeof server.stop === "function") {
+        server.stop();
+      }
+    },
+  };
+}
+
+if (import.meta.main) {
+  const server = await startTestServer();
+
   const shutdown = (): void => {
-    stopMetrics();
-    if (typeof server.stop === "function") {
-      server.stop();
-    }
-    process.exit(0);
+    server.close().then(() => process.exit(0));
   };
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
-};
-
-void run();
+}
