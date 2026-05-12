@@ -34,7 +34,8 @@ export default defineConfig({
   projects: [
     {
       name: "browser",
-      testDir: "./tests/e2e",
+      testDir: "./tests",
+      testIgnore: "**/electron/**",
     },
     {
       name: "electron",
@@ -43,4 +44,3 @@ export default defineConfig({
     },
   ],
 });
-

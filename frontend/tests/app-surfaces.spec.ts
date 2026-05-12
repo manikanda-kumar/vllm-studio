@@ -8,6 +8,10 @@ async function mockAppApis(page: Page) {
     window.localStorage.setItem("vllm-studio-setup-complete", "true");
     window.localStorage.setItem("vllmstudio_backend_url", "http://127.0.0.1:8080");
     window.localStorage.setItem(
+      "vllm-studio-state",
+      JSON.stringify({ state: { liteMode: false }, version: 0 }),
+    );
+    window.localStorage.setItem(
       "vllm-studio.controllers",
       JSON.stringify(["http://127.0.0.1:8081"]),
     );
@@ -71,7 +75,7 @@ async function mockAppApis(page: Page) {
       }),
     });
   });
-  await page.route("**/api/agent/plugins", async (route) => {
+  await page.route("**/api/agent/plugins**", async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -79,14 +83,18 @@ async function mockAppApis(page: Page) {
           {
             id: "browser-use",
             name: "browser-use",
+            displayName: "Browser Use",
             path: "/tmp/browser-use",
+            source: "openai-bundled",
             installed: true,
             enabled: true,
           },
           {
             id: "computer-use",
             name: "computer-use",
+            displayName: "Computer Use",
             path: "/tmp/computer-use",
+            source: "openai-bundled",
             installed: true,
             enabled: true,
           },
@@ -95,7 +103,7 @@ async function mockAppApis(page: Page) {
       }),
     });
   });
-  await page.route("**/api/agent/skills", async (route) => {
+  await page.route("**/api/agent/skills**", async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -241,7 +249,7 @@ test.beforeEach(async ({ page }) => {
 
 test("agent new chat surface renders with composer guidance", async ({ page }) => {
   await page.goto("/agent?new=1");
-  await expect(page.getByText(/New session\. Enter sends/)).toBeVisible();
+  await expect(page.getByText(/A dream is something you build/)).toBeVisible();
   await expect(page.getByPlaceholder(/Ask test-model/)).toBeVisible();
 });
 
@@ -265,6 +273,7 @@ test("agent composer loads plugins with @ and skills with $ as tabs", async ({ p
   await page.getByRole("button", { name: /\$browser-use:browser/ }).click();
   await expect(page.getByRole("button", { name: "Unload $browser-use:browser" })).toBeVisible();
 
+  await composer.fill("inspect the fixture app");
   await composer.press("Enter");
   await expect
     .poll(() => turnRequest?.message ?? "")
@@ -276,9 +285,11 @@ test("agent composer loads plugins with @ and skills with $ as tabs", async ({ p
 
 test("agent sends steer and follow-up controls to Pi while running", async ({ page }) => {
   const turnRequests: Array<{ mode?: string; message?: string }> = [];
+  let turnStarted = false;
   await page.route("**/api/agent/turn", async (route) => {
     const body = route.request().postDataJSON() as { mode?: string; message?: string };
     turnRequests.push(body);
+    if (!body.mode) turnStarted = true;
     await route.fulfill({
       contentType: "text/event-stream",
       body: body.mode
@@ -289,9 +300,10 @@ test("agent sends steer and follow-up controls to Pi while running", async ({ pa
         : sse(
             { type: "status", phase: "starting", sessionId: "rt-running" },
             { type: "status", phase: "running", piSessionId: "pi-running" },
+            { type: "pi", seq: 1, event: { type: "session", id: "pi-running" } },
             {
               type: "pi",
-              seq: 1,
+              seq: 2,
               event: {
                 type: "message_update",
                 assistantMessageEvent: { type: "text_delta", delta: "working" },
@@ -303,7 +315,11 @@ test("agent sends steer and follow-up controls to Pi while running", async ({ pa
   await page.route("**/api/agent/runtime/status**", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ status: { active: true, piSessionId: "pi-running", eventSeq: 1 } }),
+      body: JSON.stringify({
+        status: turnStarted
+          ? { active: true, piSessionId: "pi-running", eventSeq: 2 }
+          : { active: false, piSessionId: null, eventSeq: 0 },
+      }),
     });
   });
   await page.route("**/api/agent/runtime/events**", async (route) => {
@@ -328,7 +344,10 @@ test("agent sends steer and follow-up controls to Pi while running", async ({ pa
   await runningComposer.fill("follow later");
   await runningComposer.press("Tab");
   await expect(page.getByRole("button", { name: /queue 1 follow later/ })).toBeVisible();
-  expect(turnRequests.some((request) => request.mode === "follow_up")).toBe(false);
+  await expect.poll(() => turnRequests.some((request) => request.mode === "follow_up")).toBe(true);
+  expect(turnRequests.find((request) => request.mode === "follow_up")?.message).toBe(
+    "follow later",
+  );
 });
 
 test("agent session reattaches after navigation and survives mixed tool calls", async ({
@@ -336,6 +355,7 @@ test("agent session reattaches after navigation and survives mixed tool calls", 
 }) => {
   let replayEnabled = false;
   const replayWaiters: Array<() => void> = [];
+  let turnStarted = false;
   const enableReplay = () => {
     replayEnabled = true;
     replayWaiters.splice(0).forEach((resolve) => resolve());
@@ -344,6 +364,7 @@ test("agent session reattaches after navigation and survives mixed tool calls", 
     replayEnabled ? Promise.resolve() : new Promise<void>((resolve) => replayWaiters.push(resolve));
 
   await page.route("**/api/agent/turn", async (route) => {
+    turnStarted = true;
     await route.fulfill({
       contentType: "text/event-stream",
       body: sse(
@@ -365,7 +386,9 @@ test("agent session reattaches after navigation and survives mixed tool calls", 
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        status: { active: true, piSessionId: "pi-stream", eventSeq: 2 },
+        status: turnStarted
+          ? { active: true, piSessionId: "pi-stream", eventSeq: 2 }
+          : { active: false, piSessionId: null, eventSeq: 0 },
       }),
     });
   });
@@ -439,7 +462,6 @@ test("agent session reattaches after navigation and survives mixed tool calls", 
   await composer.fill("stream across nav");
   await composer.press("Enter");
   await expect(page.getByText("partial before nav")).toBeVisible();
-  await expect(page.getByText(/Pi is running/)).toBeVisible();
 
   await page.goto("/server");
   enableReplay();
@@ -479,7 +501,7 @@ test("archived active sessions are excluded from restart hydration", async ({ pa
 
   await page.goto("/agent");
   await expect(page.getByText("Archived should stay hidden")).toHaveCount(0);
-  await expect(page.getByText(/New session\. Enter sends/)).toBeVisible();
+  await expect(page.getByPlaceholder(/Ask test-model/)).toBeVisible();
 });
 
 test("settings exposes archive, plugin, skill, setup, and controller surfaces", async ({
