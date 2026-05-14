@@ -35,21 +35,18 @@ directories:
 mac:
   icon: desktop/resources/icon.icns
   category: public.app-category.developer-tools
+  identity: null
   target:
-    - target: dmg
-      arch:
-        - arm64
     - target: zip
       arch:
         - arm64
-  hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: desktop/resources/entitlements.mac.plist
   entitlementsInherit: desktop/resources/entitlements.mac.plist
 
 win:
   target:
-    - target: nsis
+    - target: zip
       arch:
         - x64
 
