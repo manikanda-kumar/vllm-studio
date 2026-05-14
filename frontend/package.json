@@ -38,6 +38,8 @@
     "desktop:dev:cdp": "VLLM_STUDIO_DESKTOP_CDP_PORT=9333 npm run desktop:dev",
     "desktop:start:cdp": "VLLM_STUDIO_DESKTOP_CDP_PORT=9333 npm run desktop:start:dev",
     "desktop:dist": "npm run desktop:build && npm run desktop:prepare-pi && electron-builder --config desktop/electron-builder.yml",
+    "desktop:dist:mac:zip": "npm run desktop:build && npm run desktop:prepare-pi && electron-builder --config desktop/electron-builder.yml --mac zip --arm64 --publish never",
+    "desktop:dist:win:zip": "npm run desktop:build && npm run desktop:prepare-pi && electron-builder --config desktop/electron-builder.yml --win zip --x64 --publish never",
     "desktop:pack": "npm run desktop:build && npm run desktop:prepare-pi && electron-builder --dir --config desktop/electron-builder.yml",
     "desktop:prepare-pi": "node scripts/prepare-pi-runtime.mjs"
   },
