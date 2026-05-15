@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { useRef, useState } from "react";
+import { useMobilePanelEffects } from "@/hooks/agent/use-mobile-panel-effects";
+import { useMobilePanelActions } from "@/hooks/agent/use-mobile-panel-actions";
 import {
   ChevronDown,
   ChevronUp,
@@ -79,312 +80,52 @@ export function MobilePanel({ cwd }: Props) {
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logsRef = useRef<HTMLDivElement>(null);
 
-  const fetchDevices = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/agent/mobile/devices", { cache: "no-store" });
-      const payload = (await response.json()) as { devices?: MobileDevice[]; error?: string };
-      if (!response.ok || payload.error) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const online = (payload.devices ?? []).filter((d) => d.state === "online");
-      setDevices(online);
-      // Select first device if none selected, or reset if current device disconnected
-      const currentStillOnline = selectedDevice && online.some((d) => d.id === selectedDevice);
-      if (online.length > 0 && !currentStillOnline) {
-        setSelectedDevice(online[0].id);
-      } else if (online.length === 0) {
-        setSelectedDevice(null);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to list devices");
-      setDevices([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedDevice]);
+  const {
+    fetchDevices,
+    captureScreenshot,
+    startStream,
+    stopStream,
+    handleScreenTap,
+    sendButton,
+    fetchLogs,
+  } = useMobilePanelActions({
+    selectedDevice,
+    devices,
+    tapping,
+    streamInfo,
+    imgRef,
+    wsRef,
+    frameSourceRef,
+    logsRef,
+    setDevices,
+    setSelectedDevice,
+    setLoading,
+    setError,
+    setScreenshot,
+    setScreenshotLoading,
+    setStreaming,
+    setStreamInfo,
+    setAutoRefresh,
+    setLogs,
+    setTapping,
+  });
 
-  const captureScreenshot = useCallback(async () => {
-    if (!selectedDevice) return;
-    setScreenshotLoading(true);
-    try {
-      const response = await fetch(
-        `/api/agent/mobile/screenshot?device=${encodeURIComponent(selectedDevice)}`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) {
-        const payload = (await response.json()) as { error?: string };
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      const blob = await response.blob();
-      const dataUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-      setScreenshot(dataUrl);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Screenshot failed");
-    } finally {
-      setScreenshotLoading(false);
-    }
-  }, [selectedDevice]);
-
-  // Start live frame streaming via SSE
-  const startStream = useCallback(async () => {
-    if (!selectedDevice) return;
-    const selected = devices.find((d) => d.id === selectedDevice);
-    if (!selected) return;
-
-    // Close any existing frame source
-    if (frameSourceRef.current) {
-      frameSourceRef.current.close();
-      frameSourceRef.current = null;
-    }
-
-    // iOS simulators can optionally use serve-sim for touch WebSocket
-    if (selected.platform === "ios" && selected.type === "simulator") {
-      try {
-        const response = await fetch("/api/agent/mobile/stream/start", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ device: selectedDevice }),
-        });
-        const payload = (await response.json()) as StreamInfo & { error?: string };
-        if (response.ok && !payload.error) {
-          setStreamInfo(payload);
-          // Connect WebSocket for touch control
-          const ws = new WebSocket(payload.wsUrl);
-          ws.binaryType = "arraybuffer";
-          wsRef.current = ws;
-        }
-      } catch {
-        // serve-sim unavailable, continue with SSE frames only
-      }
-    }
-
-    // Use SSE frame streaming for all devices
-    const es = new EventSource(
-      `/api/agent/mobile/frames?device=${encodeURIComponent(selectedDevice)}`,
-    );
-    frameSourceRef.current = es;
-
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as
-          | { type: "frame"; data: string; mimeType: string }
-          | { type: "error"; error: string };
-
-        if (data.type === "frame") {
-          setScreenshot(`data:${data.mimeType};base64,${data.data}`);
-          setError(null);
-        } else if (data.type === "error") {
-          setError(data.error);
-        }
-      } catch {
-        // Ignore parse errors (e.g., ping comments)
-      }
-    };
-
-    es.onerror = () => {
-      // EventSource will auto-reconnect, but mark error state
-      setError("Frame stream interrupted, reconnecting...");
-    };
-
-    setStreaming(true);
-  }, [selectedDevice, devices]);
-
-  const stopStream = useCallback(async () => {
-    setStreaming(false);
-    setAutoRefresh(false);
-    if (frameSourceRef.current) {
-      frameSourceRef.current.close();
-      frameSourceRef.current = null;
-    }
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (streamInfo) {
-      await fetch("/api/agent/mobile/stream/stop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device: selectedDevice }),
-      }).catch(() => {});
-      setStreamInfo(null);
-    }
-  }, [streamInfo, selectedDevice]);
-
-  // Handle tap on screen
-  const handleScreenTap = useCallback(
-    async (event: ReactMouseEvent<HTMLImageElement>) => {
-      if (!selectedDevice || tapping) return;
-      const img = imgRef.current;
-      if (!img) return;
-
-      const rect = img.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-
-      // Normalize to 0-1
-      const normX = x / rect.width;
-      const normY = y / rect.height;
-
-      // Convert to device coordinates (assume typical device resolution)
-      const deviceX = Math.round(normX * img.naturalWidth);
-      const deviceY = Math.round(normY * img.naturalHeight);
-
-      setTapping(true);
-      try {
-        // If WebSocket connected (iOS serve-sim), use binary protocol
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          const buffer = new ArrayBuffer(9);
-          const view = new DataView(buffer);
-          view.setUint8(0, 0x03); // WS_MSG_TOUCH
-          view.setFloat32(1, normX, true);
-          view.setFloat32(5, normY, true);
-          wsRef.current.send(buffer);
-        } else {
-          // Use mobilecli tap
-          await fetch("/api/agent/mobile/tap", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ device: selectedDevice, x: deviceX, y: deviceY }),
-          });
-        }
-        // Refresh screenshot after tap
-        setTimeout(() => void captureScreenshot(), 300);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Tap failed");
-      } finally {
-        setTapping(false);
-      }
-    },
-    [selectedDevice, tapping, captureScreenshot],
-  );
-
-  // Send button press
-  const sendButton = useCallback(
-    async (button: string) => {
-      if (!selectedDevice) return;
-      try {
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          const encoder = new TextEncoder();
-          const buttonBytes = encoder.encode(button);
-          const buffer = new ArrayBuffer(1 + buttonBytes.length);
-          const view = new Uint8Array(buffer);
-          view[0] = 0x04; // WS_MSG_BUTTON
-          view.set(buttonBytes, 1);
-          wsRef.current.send(buffer);
-        } else {
-          await fetch("/api/agent/mobile/button", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ device: selectedDevice, button }),
-          });
-        }
-        setTimeout(() => void captureScreenshot(), 300);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Button press failed");
-      }
-    },
-    [selectedDevice, captureScreenshot],
-  );
-
-  // Fetch logs
-  const fetchLogs = useCallback(async () => {
-    if (!selectedDevice) return;
-    try {
-      const response = await fetch(
-        `/api/agent/mobile/logs?device=${encodeURIComponent(selectedDevice)}&lines=50`,
-        { cache: "no-store" },
-      );
-      const payload = (await response.json()) as { logs?: string[]; error?: string };
-      if (response.ok && payload.logs) {
-        setLogs(payload.logs);
-        // Auto-scroll to bottom
-        if (logsRef.current) {
-          logsRef.current.scrollTop = logsRef.current.scrollHeight;
-        }
-      }
-    } catch {
-      // Ignore log fetch errors
-    }
-  }, [selectedDevice]);
-
-  // Initial device fetch
-  useEffect(() => {
-    void fetchDevices();
-  }, [fetchDevices]);
-
-  // Fetch health diagnostics on mount
-  useEffect(() => {
-    async function fetchHealth() {
-      try {
-        const response = await fetch("/api/agent/mobile/health", { cache: "no-store" });
-        if (response.ok) {
-          const payload = (await response.json()) as HealthPayload;
-          setHealth(payload);
-        }
-      } catch {
-        // Ignore health fetch errors
-      }
-    }
-    void fetchHealth();
-  }, []);
-
-  // Capture screenshot when device selected
-  useEffect(() => {
-    if (selectedDevice && !streaming) {
-      void captureScreenshot();
-    }
-  }, [selectedDevice, streaming, captureScreenshot]);
-
-  // Auto-refresh interval
-  useEffect(() => {
-    if (autoRefresh && selectedDevice) {
-      autoRefreshRef.current = setInterval(() => {
-        void captureScreenshot();
-      }, 1000); // 1 fps for auto-refresh
-    }
-    return () => {
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-        autoRefreshRef.current = null;
-      }
-    };
-  }, [autoRefresh, selectedDevice, captureScreenshot]);
-
-  // Fetch logs when expanded
-  useEffect(() => {
-    if (logsExpanded && selectedDevice) {
-      void fetchLogs();
-      const interval = setInterval(() => void fetchLogs(), 2000);
-      return () => clearInterval(interval);
-    }
-  }, [logsExpanded, selectedDevice, fetchLogs]);
-
-  // Dropdown outside click
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [dropdownOpen]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (frameSourceRef.current) frameSourceRef.current.close();
-      if (wsRef.current) wsRef.current.close();
-      if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
-    };
-  }, []);
+  useMobilePanelEffects({
+    selectedDevice,
+    streaming,
+    autoRefresh,
+    logsExpanded,
+    dropdownOpen,
+    dropdownRef,
+    frameSourceRef,
+    wsRef,
+    autoRefreshRef,
+    fetchDevices,
+    captureScreenshot,
+    fetchLogs,
+    setHealth,
+    setDropdownOpen,
+  });
 
   const selected = devices.find((d) => d.id === selectedDevice);
 
