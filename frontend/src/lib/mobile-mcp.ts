@@ -70,7 +70,10 @@ class MobileMcpClient {
     // Check if existing client is actually usable
     if (this.ready && this.client && this.transport) {
       // If we had a transport error, reset and reconnect
-      if (this.lastError && (this.lastError.includes("EPIPE") || this.lastError.includes("ECONNRESET"))) {
+      if (
+        this.lastError &&
+        (this.lastError.includes("EPIPE") || this.lastError.includes("ECONNRESET"))
+      ) {
         this.ready = false;
         this.client = null;
         this.transport = null;
@@ -257,10 +260,6 @@ function getClient(): MobileMcpClient {
 
 export function getMobileMcpClient(): MobileMcpClient {
   return getClient();
-}
-
-export async function startMobileMcp(): Promise<void> {
-  await getClient().ensureReady();
 }
 
 export async function stopMobileMcp(): Promise<void> {
