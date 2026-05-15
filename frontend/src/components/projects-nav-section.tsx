@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   CloseIcon,
   EyeOffIcon,
@@ -18,16 +18,30 @@ import {
   mergeActiveAgentSessions,
   type ActiveAgentSessionSnapshot,
 } from "@/lib/agent/active-sessions";
-
-type ProjectEntry = {
-  id: string;
-  name: string;
-  path: string;
-  addedAt: string;
-  exists: boolean;
-  hasGit: boolean;
-  branch: string | null;
-};
+import {
+  ACTIVE_AGENT_SESSION_OPEN_EVENT,
+  ACTIVE_AGENT_SESSION_RENAME_EVENT,
+  ACTIVE_AGENT_SESSIONS_EVENT,
+  ADD_PROJECT_EVENT,
+  NEW_AGENT_SESSION_EVENT,
+  PROJECTS_CHANGED_EVENT,
+  SESSION_PREFS_CHANGED_EVENT,
+  SESSIONS_CHANGED_EVENT,
+} from "@/lib/agent/workspace/events";
+import {
+  loadPersistedActiveAgentSessions,
+  persistActiveAgentSessions,
+} from "@/lib/agent/workspace/store";
+import { useProjects } from "@/lib/agent/projects/context";
+import { addProjectFromPath, openProjectDirectory } from "@/lib/agent/projects/api";
+import { useClickOutside } from "@/hooks/use-click-outside";
+import {
+  loadSessionPrefs,
+  patchSessionPref,
+  type SessionPref,
+  type SessionPrefs,
+} from "@/lib/agent/session/prefs";
+import type { Project as ProjectEntry } from "@/lib/agent/projects/types";
 
 type SessionSummary = {
   id: string;
@@ -56,49 +70,12 @@ type DirectoryBrowserPayload = {
   error?: string;
 };
 
-const ADD_PROJECT_EVENT = "vllm-studio.agent.addProject";
-export const SESSIONS_CHANGED_EVENT = "vllm-studio.agent.sessionsChanged";
-export const PROJECTS_CHANGED_EVENT = "vllm-studio.agent.projectsChanged";
-export const ACTIVE_AGENT_SESSIONS_EVENT = "vllm-studio.agent.activeSessions";
-export const NEW_AGENT_SESSION_EVENT = "vllm-studio.agent.newSession";
-export const ACTIVE_AGENT_SESSION_RENAME_EVENT = "vllm-studio.agent.activeSessionRename";
-export const ACTIVE_AGENT_SESSION_OPEN_EVENT = "vllm-studio.agent.activeSessionOpen";
-
 type ActiveAgentSession = ActiveAgentSessionSnapshot;
 
-type SessionPref = {
-  title?: string;
-  pinned?: boolean;
-  hidden?: boolean;
-};
-
-const SESSION_PREFS_KEY = "vllm-studio.agent.sessionPrefs";
 const SHOW_HIDDEN_KEY = "vllm-studio.agent.sessionPrefs.showHidden";
-const SESSION_PREFS_CHANGED_EVENT = "vllm-studio.agent.sessionPrefs.changed";
-const ACTIVE_AGENT_SESSIONS_KEY = "vllm-studio.agent.activeSessions.snapshot";
-
-function loadActiveAgentSessions(): ActiveAgentSession[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(ACTIVE_AGENT_SESSIONS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as ActiveAgentSession[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveActiveAgentSessions(sessions: ActiveAgentSession[]) {
-  if (typeof window === "undefined") return;
-  const prefs = loadSessionPrefs();
-  const merged = mergeActiveAgentSessions(loadActiveAgentSessions(), sessions, prefs);
-  if (merged.length > 0) {
-    window.localStorage.setItem(ACTIVE_AGENT_SESSIONS_KEY, JSON.stringify(merged));
-  } else {
-    window.localStorage.removeItem(ACTIVE_AGENT_SESSIONS_KEY);
-  }
-}
+const SESSION_NAV_TITLE_PREFIX = "vllm-studio.agent.sessionNavTitle:";
+const SESSION_MENU_CLASS =
+  "absolute right-0 top-5 z-50 min-w-[150px] rounded-md border border-(--border) bg-[#151515] p-1 text-xs text-(--fg) shadow-[0_8px_28px_rgba(0,0,0,0.65)]";
 
 function setAgentSessionDragData(
   event: DragEvent,
@@ -118,42 +95,22 @@ function setAgentSessionDragData(
   event.dataTransfer.effectAllowed = "copy";
 }
 
-function loadSessionPrefs(): Record<string, SessionPref> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(SESSION_PREFS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, SessionPref>) : {};
-  } catch {
-    return {};
-  }
+function activeSessionPrefKeys(session: ActiveAgentSession): string[] {
+  return [
+    session.piSessionId,
+    session.paneId && session.tabId ? `tab:${session.paneId}:${session.tabId}` : null,
+  ].filter((value): value is string => Boolean(value));
 }
 
-function saveSessionPrefs(prefs: Record<string, SessionPref>) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(SESSION_PREFS_KEY, JSON.stringify(prefs));
-  window.dispatchEvent(new Event(SESSION_PREFS_CHANGED_EVENT));
+function activeSessionPref(session: ActiveAgentSession, prefs: SessionPrefs): SessionPref {
+  return activeSessionPrefKeys(session).reduce<SessionPref>(
+    (merged, key) => ({ ...merged, ...(prefs[key] ?? {}) }),
+    {},
+  );
 }
 
-function removeSessionPref(piSessionId: string) {
-  const all = loadSessionPrefs();
-  delete all[piSessionId];
-  saveSessionPrefs(all);
-}
-
-function patchSessionPref(piSessionId: string, patch: SessionPref) {
-  const all = loadSessionPrefs();
-  const current = all[piSessionId] ?? {};
-  const next: SessionPref = { ...current, ...patch };
-  // Normalize: drop the entry entirely if all flags are cleared so we don't
-  // grow localStorage forever.
-  if (!next.title && !next.pinned && !next.hidden) {
-    delete all[piSessionId];
-  } else {
-    all[piSessionId] = next;
-  }
-  saveSessionPrefs(all);
+function patchActiveSessionPref(session: ActiveAgentSession, patch: SessionPref) {
+  for (const key of activeSessionPrefKeys(session)) patchSessionPref(key, patch);
 }
 
 function relativeAge(value?: string | null): string {
@@ -168,11 +125,29 @@ function relativeAge(value?: string | null): string {
   return days === 1 ? "1 day" : `${days} days`;
 }
 
+function sessionDedupeKey(session: SessionSummary): string {
+  const label = (session.firstUserMessage || "Untitled session")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return `${label}:${relativeAge(session.startedAt)}`;
+}
+
 function useSessionPrefs() {
-  const [prefs, setPrefs] = useState<Record<string, SessionPref>>(() => loadSessionPrefs());
+  const [prefs, setPrefs] = useState<SessionPrefs>(() => loadSessionPrefs());
   useEffect(() => {
-    const refresh = () => setPrefs(loadSessionPrefs());
-    refresh();
+    const refresh = () =>
+      setPrefs((current) => {
+        const next = loadSessionPrefs();
+        // Avoid rerenders when nothing actually changed — `storage` events fire
+        // for every key write on this domain.
+        try {
+          if (JSON.stringify(current) === JSON.stringify(next)) return current;
+        } catch {
+          // fall through — return next
+        }
+        return next;
+      });
     window.addEventListener(SESSION_PREFS_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
@@ -188,39 +163,27 @@ export function triggerAddProjectFlow() {
   window.dispatchEvent(new Event(ADD_PROJECT_EVENT));
 }
 
-function notifyProjectsChanged() {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new Event(PROJECTS_CHANGED_EVENT));
-}
-
-type DesktopBridge = {
-  openDirectory?: () => Promise<ProjectEntry | null>;
-  listProjects?: () => Promise<ProjectEntry[]>;
-  removeProject?: (id: string) => Promise<{ ok: true }>;
-};
-
-function getDesktopBridge(): DesktopBridge | null {
-  if (typeof window === "undefined") return null;
-  const candidate = (window as unknown as { vllmStudioDesktop?: Partial<DesktopBridge> })
-    .vllmStudioDesktop;
-  if (!candidate) return null;
-  const hasBridgeMethod =
-    typeof candidate.openDirectory === "function" ||
-    typeof candidate.listProjects === "function" ||
-    typeof candidate.removeProject === "function";
-  if (!hasBridgeMethod) return null;
-  return candidate as DesktopBridge;
-}
-
-export async function loadAgentProjects(): Promise<ProjectEntry[]> {
-  const desktopBridge = getDesktopBridge();
-  if (desktopBridge?.listProjects) {
-    return desktopBridge.listProjects();
+export function rememberAgentSessionNavTitle(sessionId: string | null | undefined, title: string) {
+  if (typeof window === "undefined" || !sessionId) return;
+  const trimmed = title.trim();
+  if (!trimmed || trimmed === "Loading session") return;
+  try {
+    window.sessionStorage.setItem(`${SESSION_NAV_TITLE_PREFIX}${sessionId}`, trimmed);
+  } catch {
+    return;
   }
-  const response = await fetch("/api/agent/projects", { cache: "no-store" });
-  const payload = (await response.json()) as { projects?: ProjectEntry[]; error?: string };
-  if (!response.ok) throw new Error(payload.error || "Failed to load projects");
-  return payload.projects ?? [];
+}
+
+export function consumeAgentSessionNavTitle(sessionId: string | null | undefined) {
+  if (typeof window === "undefined" || !sessionId) return undefined;
+  const key = `${SESSION_NAV_TITLE_PREFIX}${sessionId}`;
+  try {
+    const title = window.sessionStorage.getItem(key)?.trim() || undefined;
+    window.sessionStorage.removeItem(key);
+    return title;
+  } catch {
+    return undefined;
+  }
 }
 
 function ProjectDirectoryPickerModal({
@@ -375,109 +338,104 @@ function ProjectDirectoryPickerModal({
  * `expanded`).
  */
 export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
-  const [projects, setProjects] = useState<ProjectEntry[]>([]);
+  const projectsContext = useProjects();
+  const projects = projectsContext.projects;
+  const upsertProject = projectsContext.upsertProject;
+  const removeProject = projectsContext.removeProject;
+  const refreshProjects = projectsContext.refresh;
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [activeSessions, setActiveSessions] = useState<ActiveAgentSession[]>(() =>
-    loadActiveAgentSessions(),
+    loadPersistedActiveAgentSessions(),
   );
   const [addError, setAddError] = useState("");
   const [directoryModalOpen, setDirectoryModalOpen] = useState(false);
   const [pinnedSessions, setPinnedSessions] = useState<PinnedSession[]>([]);
   const prefs = useSessionPrefs();
-  const pinnedActiveSessions = activeSessions
-    .filter(
-      (session) =>
-        session.piSessionId &&
-        prefs[session.piSessionId]?.pinned &&
-        !prefs[session.piSessionId]?.hidden,
-    )
-    .map((session) => ({
-      session,
-      project: projects.find((project) => project.id === session.projectId),
-    }))
-    .filter((entry): entry is { session: ActiveAgentSession; project: ProjectEntry } =>
-      Boolean(entry.project),
-    );
-
-  const loadProjects = useCallback(async () => {
-    try {
-      setProjects(await loadAgentProjects());
-    } catch {
-      setProjects([]);
+  const pinnedPrefIds = useMemo(
+    () =>
+      Object.entries(prefs)
+        .filter(([, pref]) => pref.pinned && !pref.hidden)
+        .map(([id]) => id)
+        .sort(),
+    [prefs],
+  );
+  const hiddenPrefIds = useMemo(
+    () =>
+      Object.entries(prefs)
+        .filter(([, pref]) => pref.hidden)
+        .map(([id]) => id)
+        .sort(),
+    [prefs],
+  );
+  const activePiSessionIds = useMemo(
+    () =>
+      activeSessions
+        .map((session) => session.piSessionId)
+        .filter((id): id is string => Boolean(id))
+        .sort(),
+    [activeSessions],
+  );
+  const pinnedPrefIdsKey = pinnedPrefIds.join("\u0000");
+  const hiddenPrefIdsKey = hiddenPrefIds.join("\u0000");
+  const activePiSessionIdsKey = activePiSessionIds.join("\u0000");
+  const projectsById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project] as const)),
+    [projects],
+  );
+  const pinnedActiveSessions = useMemo(
+    () =>
+      activeSessions
+        .filter((session) => {
+          const pref = activeSessionPref(session, prefs);
+          return pref.pinned && !pref.hidden;
+        })
+        .map((session) => ({
+          session,
+          project: projectsById.get(session.projectId),
+        }))
+        .filter((entry): entry is { session: ActiveAgentSession; project: ProjectEntry } =>
+          Boolean(entry.project),
+        ),
+    [activeSessions, prefs, projectsById],
+  );
+  // Track every piSessionId already rendered in a pinned row so per-project
+  // recent/active lists can skip duplicates further down the tree.
+  const pinnedRenderedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const { session } of pinnedActiveSessions) {
+      if (session.piSessionId) ids.add(session.piSessionId);
     }
-  }, []);
+    for (const session of pinnedSessions) ids.add(session.id);
+    return ids;
+  }, [pinnedActiveSessions, pinnedSessions]);
 
-  const upsertProject = useCallback((project: ProjectEntry) => {
-    setProjects((current) => [project, ...current.filter((entry) => entry.id !== project.id)]);
-    notifyProjectsChanged();
-  }, []);
-
-  const removeProject = useCallback(async (id: string) => {
-    const desktopBridge = getDesktopBridge();
-    if (desktopBridge?.removeProject) {
-      await desktopBridge.removeProject(id);
-    } else {
-      const response = await fetch(`/api/agent/projects?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
+  const removeProjectAndCloseRow = useCallback(
+    async (id: string) => {
+      await removeProject(id);
+      setOpenIds((current) => {
+        if (!current.has(id)) return current;
+        const next = new Set(current);
+        next.delete(id);
+        return next;
       });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(payload.error || "Failed to remove project");
-      }
-    }
-    setProjects((current) => current.filter((entry) => entry.id !== id));
-    notifyProjectsChanged();
-    setOpenIds((current) => {
-      if (!current.has(id)) return current;
-      const next = new Set(current);
-      next.delete(id);
-      return next;
-    });
-  }, []);
+    },
+    [removeProject],
+  );
 
-  useEffect(() => {
-    if (!expanded) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await loadAgentProjects();
-        if (!cancelled) setProjects(list);
-      } catch {
-        if (!cancelled) setProjects([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [expanded]);
-
-  const addProjectFromPath = async (directoryPath: string): Promise<ProjectEntry> => {
-    const response = await fetch("/api/agent/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: directoryPath }),
-    });
-    const payload = (await response.json()) as { project?: ProjectEntry; error?: string };
-    if (!response.ok || !payload.project) {
-      throw new Error(payload.error || "Failed to add project");
-    }
-    return payload.project;
-  };
-
-  const handleAddProject = async () => {
+  const handleAddProject = useCallback(async () => {
     setAddError("");
-    const desktopBridge = getDesktopBridge();
-    if (desktopBridge?.openDirectory) {
-      try {
-        const project = await desktopBridge.openDirectory();
-        if (project) upsertProject(project);
-      } catch (error) {
-        setAddError(error instanceof Error ? error.message : "Failed to add project");
+    try {
+      const desktopProject = await openProjectDirectory();
+      if (desktopProject) {
+        upsertProject(desktopProject);
+        return;
       }
+    } catch (error) {
+      setAddError(error instanceof Error ? error.message : "Failed to add project");
       return;
     }
     setDirectoryModalOpen(true);
-  };
+  }, [upsertProject]);
 
   const handleDirectoryPicked = async (directoryPath: string) => {
     setAddError("");
@@ -485,7 +443,7 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
       const project = await addProjectFromPath(directoryPath);
       upsertProject(project);
       setDirectoryModalOpen(false);
-      void loadProjects();
+      void refreshProjects();
     } catch (error) {
       setAddError(error instanceof Error ? error.message : "Failed to add project");
     }
@@ -502,7 +460,7 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
   useEffect(() => {
     window.addEventListener(ADD_PROJECT_EVENT, handleAddProject);
     return () => window.removeEventListener(ADD_PROJECT_EVENT, handleAddProject);
-  });
+  }, [handleAddProject]);
 
   useEffect(() => {
     const onActiveSessions = (event: Event) => {
@@ -511,7 +469,7 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
       setActiveSessions((current) =>
         mergeActiveAgentSessions(current, sessions, loadSessionPrefs()),
       );
-      saveActiveAgentSessions(sessions);
+      persistActiveAgentSessions(sessions);
     };
     window.addEventListener(ACTIVE_AGENT_SESSIONS_EVENT, onActiveSessions);
     return () => window.removeEventListener(ACTIVE_AGENT_SESSIONS_EVENT, onActiveSessions);
@@ -522,18 +480,27 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
       queueMicrotask(() => setPinnedSessions([]));
       return;
     }
+    if (!pinnedPrefIdsKey) {
+      queueMicrotask(() => setPinnedSessions([]));
+      return;
+    }
     let cancelled = false;
+    const pinnedIdsList = pinnedPrefIdsKey.split("\u0000").filter(Boolean);
+    const pinnedIds = new Set(pinnedIdsList);
+    const hiddenIds = new Set(hiddenPrefIdsKey.split("\u0000").filter(Boolean));
+    const activeIds = new Set(activePiSessionIdsKey.split("\u0000").filter(Boolean));
+    const idsParam = encodeURIComponent(pinnedIdsList.join(","));
     (async () => {
       const rows = await Promise.all(
         projects.map(async (project) => {
           try {
             const response = await fetch(
-              `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&since=30d`,
+              `/api/agent/sessions?cwd=${encodeURIComponent(project.path)}&since=30d&ids=${idsParam}`,
               { cache: "no-store" },
             );
             const payload = await safeJson<{ sessions?: SessionSummary[] }>(response);
             return (payload.sessions ?? [])
-              .filter((session) => prefs[session.id]?.pinned && !prefs[session.id]?.hidden)
+              .filter((session) => pinnedIds.has(session.id) && !hiddenIds.has(session.id))
               .map((session) => ({ ...session, project }));
           } catch {
             return [];
@@ -541,15 +508,10 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
         }),
       );
       if (!cancelled) {
-        const activePiSessionIds = new Set(
-          activeSessions
-            .map((session) => session.piSessionId)
-            .filter((id): id is string => Boolean(id)),
-        );
         setPinnedSessions(
           rows
             .flat()
-            .filter((session) => !activePiSessionIds.has(session.id))
+            .filter((session) => !activeIds.has(session.id))
             .sort(
               (a, b) =>
                 new Date(b.startedAt || b.updatedAt).getTime() -
@@ -561,7 +523,7 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [activeSessions, expanded, projects, prefs]);
+  }, [activePiSessionIdsKey, expanded, hiddenPrefIdsKey, pinnedPrefIdsKey, projects]);
 
   if (!expanded) {
     return null;
@@ -585,7 +547,7 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
               key={`${session.paneId}:${session.tabId}`}
               project={project}
               session={session}
-              pref={session.piSessionId ? (prefs[session.piSessionId] ?? {}) : {}}
+              pref={activeSessionPref(session, prefs)}
             />
           ))}
           {pinnedSessions.map((session) => (
@@ -625,10 +587,12 @@ export function ProjectsNavSection({ expanded }: { expanded: boolean }) {
             project={project}
             open={openIds.has(project.id)}
             activeSessions={activeSessions.filter((session) => session.projectId === project.id)}
+            prefs={prefs}
+            excludedIds={pinnedRenderedIds}
             onToggle={() => toggle(project.id)}
             onRemove={() => {
               setAddError("");
-              void removeProject(project.id).catch((error) => {
+              void removeProjectAndCloseRow(project.id).catch((error) => {
                 setAddError(error instanceof Error ? error.message : "Failed to remove project");
               });
             }}
@@ -646,12 +610,16 @@ function ProjectRow({
   onToggle,
   onRemove,
   activeSessions,
+  prefs,
+  excludedIds,
 }: {
   project: ProjectEntry;
   open: boolean;
   onToggle: () => void;
   onRemove: () => void;
   activeSessions: ActiveAgentSession[];
+  prefs: SessionPrefs;
+  excludedIds: ReadonlySet<string>;
 }) {
   const [missingErrorVisible, setMissingErrorVisible] = useState(false);
   const handleToggle = () => {
@@ -734,8 +702,13 @@ function ProjectRow({
           </button>
         </div>
       ) : null}
-      {(open || activeSessions.length > 0) && project.exists ? (
-        <ProjectSessions project={project} activeSessions={activeSessions} />
+      {open && project.exists ? (
+        <ProjectSessions
+          project={project}
+          activeSessions={activeSessions}
+          prefs={prefs}
+          excludedIds={excludedIds}
+        />
       ) : null}
     </div>
   );
@@ -744,19 +717,29 @@ function ProjectRow({
 function ProjectSessions({
   project,
   activeSessions,
+  prefs,
+  excludedIds,
 }: {
   project: ProjectEntry;
   activeSessions: ActiveAgentSession[];
+  prefs: SessionPrefs;
+  /** Session ids already rendered elsewhere in the sidebar (e.g. Pinned). */
+  excludedIds: ReadonlySet<string>;
 }) {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const projectActiveSessions = activeSessions.filter(
-    (session) => session.projectId === project.id,
+  const projectActiveSessions = useMemo(
+    () => activeSessions.filter((session) => session.projectId === project.id),
+    [activeSessions, project.id],
   );
-  const activePiSessionIds = new Set(
-    projectActiveSessions
-      .map((session) => session.piSessionId)
-      .filter((id): id is string => Boolean(id)),
+  const activePiSessionIds = useMemo(
+    () =>
+      new Set(
+        projectActiveSessions
+          .map((session) => session.piSessionId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    [projectActiveSessions],
   );
 
   const reload = useCallback(async () => {
@@ -783,7 +766,6 @@ function ProjectSessions({
     return () => window.removeEventListener(SESSIONS_CHANGED_EVENT, reload);
   }, [reload]);
 
-  const prefs = useSessionPrefs();
   const [showHidden, setShowHidden] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SHOW_HIDDEN_KEY) === "1";
@@ -797,23 +779,36 @@ function ProjectSessions({
       return next;
     });
 
-  const visibleActiveSessions = projectActiveSessions.filter((session) => {
-    if (!session.piSessionId) return true;
-    const pref = prefs[session.piSessionId];
-    if (pref?.pinned) return false;
-    return showHidden || !pref?.hidden;
-  });
-
-  const allRecent = (sessions ?? []).filter(
-    (session) => !activePiSessionIds.has(session.id) && !prefs[session.id]?.pinned,
+  const visibleActiveSessions = useMemo(
+    () =>
+      projectActiveSessions.filter((session) => {
+        const pref = activeSessionPref(session, prefs);
+        if (pref?.pinned) return false;
+        if (session.piSessionId && excludedIds.has(session.piSessionId)) return false;
+        return showHidden || !pref?.hidden;
+      }),
+    [projectActiveSessions, prefs, excludedIds, showHidden],
   );
-  const recent: SessionSummary[] = [];
-  const hidden: SessionSummary[] = [];
-  for (const session of allRecent) {
-    const pref = prefs[session.id] ?? {};
-    if (pref.hidden) hidden.push(session);
-    else recent.push(session);
-  }
+
+  const { recent, hidden, allRecent } = useMemo(() => {
+    const seen = new Set<string>();
+    const recent: SessionSummary[] = [];
+    const hidden: SessionSummary[] = [];
+    const allRecent: SessionSummary[] = [];
+    for (const session of sessions ?? []) {
+      if (activePiSessionIds.has(session.id)) continue;
+      if (excludedIds.has(session.id)) continue;
+      if (prefs[session.id]?.pinned) continue;
+      const key = sessionDedupeKey(session);
+      if (seen.has(session.id) || seen.has(key)) continue;
+      seen.add(session.id);
+      seen.add(key);
+      allRecent.push(session);
+      if (prefs[session.id]?.hidden) hidden.push(session);
+      else recent.push(session);
+    }
+    return { recent, hidden, allRecent };
+  }, [sessions, activePiSessionIds, excludedIds, prefs]);
 
   return (
     <div className="flex flex-col">
@@ -822,7 +817,7 @@ function ProjectSessions({
           key={`${session.paneId}:${session.tabId}`}
           project={project}
           session={session}
-          pref={session.piSessionId ? (prefs[session.piSessionId] ?? {}) : {}}
+          pref={activeSessionPref(session, prefs)}
         />
       ))}
 
@@ -867,52 +862,70 @@ function ProjectSessions({
   );
 }
 
-function ActiveSessionRow({
-  project,
-  session,
-  pref,
-}: {
-  project: ProjectEntry;
-  session: ActiveAgentSession;
+type SessionNavRowProps = {
   pref: SessionPref;
-}) {
+  label: string;
+  initialDraft: string;
+  age: string;
+  rowClass: string;
+  renameRowClass?: string;
+  href?: string;
+  onOpen?: () => void;
+  onPatchPref: (patch: SessionPref) => void;
+  onRenameCommit?: (title: string) => void;
+  onRememberTitle?: () => void;
+  onDragStart: (event: DragEvent) => void;
+  onContextMenu?: boolean;
+  isRunning?: boolean;
+  canDoubleClickRename?: boolean;
+  showClearAction?: boolean;
+  menuIconClass?: string;
+  renameInputClass?: string;
+  menuItemsWithIcons?: boolean;
+};
+
+function SessionNavRow({
+  pref,
+  label,
+  initialDraft,
+  age,
+  rowClass,
+  renameRowClass = rowClass,
+  href,
+  onOpen,
+  onPatchPref,
+  onRenameCommit,
+  onRememberTitle,
+  onDragStart,
+  onContextMenu = false,
+  isRunning = false,
+  canDoubleClickRename = false,
+  showClearAction = false,
+  menuIconClass = "h-3 w-3",
+  renameInputClass = "text-[12px]",
+  menuItemsWithIcons = false,
+}: SessionNavRowProps) {
   const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(pref.title ?? session.title ?? "");
+  const [draft, setDraft] = useState(initialDraft);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const label = pref.title || session.title || "Current session";
-  const age = relativeAge(session.startedAt ?? session.updatedAt);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDocClick = (event: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [menuOpen]);
+  useClickOutside(menuRef, menuOpen, () => setMenuOpen(false));
 
+  const startRename = () => {
+    setDraft(initialDraft);
+    setRenaming(true);
+  };
   const finishRename = () => {
     const trimmed = draft.trim();
-    if (session.piSessionId) patchSessionPref(session.piSessionId, { title: trimmed || undefined });
-    window.dispatchEvent(
-      new CustomEvent(ACTIVE_AGENT_SESSION_RENAME_EVENT, {
-        detail: { paneId: session.paneId, tabId: session.tabId, title: trimmed || session.title },
-      }),
-    );
+    onPatchPref({ title: trimmed || undefined });
+    onRenameCommit?.(trimmed);
     setRenaming(false);
   };
 
-  const isRunning = session.status !== "idle" && session.status !== "done";
-  const isActive = session.active === true;
-  const rowClass = `group relative flex h-7 items-center gap-1 pl-4 pr-2 transition-colors ${
-    isActive ? "text-(--fg)" : "text-(--dim) hover:text-(--fg)"
-  }`;
-
   if (renaming) {
     return (
-      <div className={rowClass}>
+      <div className={renameRowClass}>
         <input
           autoFocus
           value={draft}
@@ -921,11 +934,11 @@ function ActiveSessionRow({
           onKeyDown={(event) => {
             if (event.key === "Enter") finishRename();
             if (event.key === "Escape") {
-              setDraft(pref.title ?? session.title ?? "");
+              setDraft(initialDraft);
               setRenaming(false);
             }
           }}
-          className="min-w-0 flex-1 bg-transparent text-[13px] text-(--fg) outline-none"
+          className={`min-w-0 flex-1 bg-transparent ${renameInputClass} text-(--fg) outline-none`}
         />
       </div>
     );
@@ -939,29 +952,41 @@ function ActiveSessionRow({
       ) : null}
     </>
   );
+  const openProps = canDoubleClickRename
+    ? {
+        onDoubleClick: (event: React.MouseEvent) => {
+          event.preventDefault();
+          startRename();
+        },
+      }
+    : {};
 
   return (
-    <div className={rowClass}>
+    <div
+      className={rowClass}
+      onContextMenu={
+        onContextMenu
+          ? (event) => {
+              event.preventDefault();
+              setMenuOpen(true);
+            }
+          : undefined
+      }
+    >
       <SessionPinButton
         pinned={Boolean(pref.pinned)}
-        disabled={!session.piSessionId}
         running={isRunning}
-        onToggle={() => {
-          if (session.piSessionId) patchSessionPref(session.piSessionId, { pinned: !pref.pinned });
-        }}
+        onToggle={() => onPatchPref({ pinned: !pref.pinned })}
       />
-      {session.piSessionId ? (
+      {href ? (
         <Link
-          href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.piSessionId)}`}
+          href={href}
           title={label}
           draggable
-          onDragStart={(event) => setAgentSessionDragData(event, session)}
-          onDoubleClick={(event) => {
-            event.preventDefault();
-            setDraft(pref.title ?? session.title ?? "");
-            setRenaming(true);
-          }}
+          onClick={onRememberTitle}
+          onDragStart={onDragStart}
           className="flex min-w-0 flex-1 items-center gap-1 pr-5"
+          {...openProps}
         >
           {content}
         </Link>
@@ -969,19 +994,10 @@ function ActiveSessionRow({
         <button
           type="button"
           draggable
-          onDragStart={(event) => setAgentSessionDragData(event, session)}
-          onClick={() => {
-            window.dispatchEvent(
-              new CustomEvent(ACTIVE_AGENT_SESSION_OPEN_EVENT, {
-                detail: { paneId: session.paneId, tabId: session.tabId, mode: "focus" },
-              }),
-            );
-          }}
-          onDoubleClick={() => {
-            setDraft(pref.title ?? session.title ?? "");
-            setRenaming(true);
-          }}
+          onDragStart={onDragStart}
+          onClick={onOpen}
           className="flex min-w-0 flex-1 items-center gap-1 pr-5 text-left"
+          {...openProps}
         >
           {content}
         </button>
@@ -998,15 +1014,14 @@ function ActiveSessionRow({
           aria-label="Session options"
           title="Session options"
         >
-          <MoreIcon className="h-4 w-4" />
+          <MoreIcon className={menuIconClass} />
         </button>
         {menuOpen ? (
-          <div className="absolute right-0 top-5 z-50 min-w-[150px] rounded-md border border-(--border) bg-(--bg) p-1 text-xs shadow-lg">
+          <div className={SESSION_MENU_CLASS}>
             <SessionMenuItem
               onClick={() => {
                 setMenuOpen(false);
-                setDraft(pref.title ?? session.title ?? "");
-                setRenaming(true);
+                startRename();
               }}
             >
               Rename
@@ -1014,25 +1029,109 @@ function ActiveSessionRow({
             <SessionMenuItem
               onClick={() => {
                 setMenuOpen(false);
-                if (session.piSessionId)
-                  patchSessionPref(session.piSessionId, { pinned: !pref.pinned });
+                onPatchPref({ pinned: !pref.pinned });
               }}
             >
-              {pref.pinned ? "Unpin" : "Pin"}
+              {menuItemsWithIcons ? (
+                <span className="inline-flex items-center gap-2">
+                  <PinIcon className="h-4 w-4" /> {pref.pinned ? "Unpin" : "Pin"}
+                </span>
+              ) : pref.pinned ? (
+                "Unpin"
+              ) : (
+                "Pin"
+              )}
             </SessionMenuItem>
             <SessionMenuItem
               onClick={() => {
                 setMenuOpen(false);
-                if (session.piSessionId)
-                  patchSessionPref(session.piSessionId, { hidden: !pref.hidden });
+                onPatchPref({ hidden: !pref.hidden });
               }}
             >
-              {pref.hidden ? "Unarchive" : "Archive"}
+              {menuItemsWithIcons ? (
+                <span className="inline-flex items-center gap-2">
+                  <EyeOffIcon className="h-4 w-4" /> {pref.hidden ? "Unarchive" : "Archive"}
+                </span>
+              ) : pref.hidden ? (
+                "Unarchive"
+              ) : (
+                "Archive"
+              )}
             </SessionMenuItem>
+            {showClearAction && (pref.title || pref.pinned || pref.hidden) ? (
+              <SessionMenuItem
+                onClick={() => {
+                  setMenuOpen(false);
+                  onPatchPref({ title: undefined, pinned: undefined, hidden: undefined });
+                }}
+              >
+                <span className="inline-flex items-center gap-2 text-(--err)">
+                  <CloseIcon className="h-4 w-4" /> Clear
+                </span>
+              </SessionMenuItem>
+            ) : null}
           </div>
         ) : null}
       </div>
     </div>
+  );
+}
+
+function ActiveSessionRow({
+  project,
+  session,
+  pref,
+}: {
+  project: ProjectEntry;
+  session: ActiveAgentSession;
+  pref: SessionPref;
+}) {
+  const label = pref.title || session.title || "Current session";
+  const isActive = session.active === true;
+  const rowClass = `group relative flex h-7 items-center gap-1 pl-4 pr-2 transition-colors ${
+    isActive
+      ? "text-(--fg) before:absolute before:inset-y-1 before:left-0 before:w-[2px] before:rounded-full before:bg-(--accent) before:content-['']"
+      : "text-(--dim) hover:text-(--fg)"
+  }`;
+
+  return (
+    <SessionNavRow
+      pref={pref}
+      label={label}
+      initialDraft={pref.title ?? session.title ?? ""}
+      age={relativeAge(session.startedAt ?? session.updatedAt)}
+      rowClass={rowClass}
+      href={
+        session.piSessionId
+          ? `/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.piSessionId)}`
+          : undefined
+      }
+      onOpen={() => {
+        window.dispatchEvent(
+          new CustomEvent(ACTIVE_AGENT_SESSION_OPEN_EVENT, {
+            detail: { paneId: session.paneId, tabId: session.tabId, mode: "focus" },
+          }),
+        );
+      }}
+      onPatchPref={(patch) => patchActiveSessionPref(session, patch)}
+      onRenameCommit={(trimmed) => {
+        window.dispatchEvent(
+          new CustomEvent(ACTIVE_AGENT_SESSION_RENAME_EVENT, {
+            detail: {
+              paneId: session.paneId,
+              tabId: session.tabId,
+              title: trimmed || session.title,
+            },
+          }),
+        );
+      }}
+      onRememberTitle={() => rememberAgentSessionNavTitle(session.piSessionId, label)}
+      onDragStart={(event) => setAgentSessionDragData(event, session)}
+      isRunning={session.status !== "idle" && session.status !== "done"}
+      canDoubleClickRename
+      menuIconClass="h-4 w-4"
+      renameInputClass="text-[13px]"
+    />
   );
 }
 
@@ -1045,153 +1144,30 @@ function SessionRow({
   session: SessionSummary;
   pref: SessionPref;
 }) {
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(pref.title ?? session.firstUserMessage ?? "");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDocClick = (event: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [menuOpen]);
-
   const label = pref.title || session.firstUserMessage || "Untitled session";
-  const age = relativeAge(session.startedAt);
-
-  const finishRename = () => {
-    const trimmed = draft.trim();
-    patchSessionPref(session.id, { title: trimmed || undefined });
-    setRenaming(false);
-  };
-
-  if (renaming) {
-    return (
-      <div className="flex h-7 items-center gap-1 bg-(--surface)/60 pl-4 pr-2">
-        <input
-          autoFocus
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={finishRename}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") finishRename();
-            if (event.key === "Escape") {
-              setDraft(pref.title ?? session.firstUserMessage ?? "");
-              setRenaming(false);
-            }
-          }}
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-(--fg) outline-none"
-        />
-      </div>
-    );
-  }
-
   return (
-    <div
-      className="group relative flex h-7 items-center gap-1 pl-4 pr-2 text-(--dim) transition-colors hover:text-(--fg)"
-      onContextMenu={(event) => {
-        event.preventDefault();
-        setMenuOpen(true);
+    <SessionNavRow
+      pref={pref}
+      label={label}
+      initialDraft={pref.title ?? session.firstUserMessage ?? ""}
+      age={relativeAge(session.startedAt)}
+      rowClass="group relative flex h-7 items-center gap-1 pl-4 pr-2 text-(--dim) transition-colors hover:text-(--fg)"
+      renameRowClass="flex h-7 items-center gap-1 bg-(--surface)/60 pl-4 pr-2"
+      href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}`}
+      onPatchPref={(patch) => patchSessionPref(session.id, patch)}
+      onRememberTitle={() => rememberAgentSessionNavTitle(session.id, label)}
+      onDragStart={(event) => {
+        setAgentSessionDragData(event, {
+          piSessionId: session.id,
+          projectId: project.id,
+          cwd: project.path,
+          title: label,
+        });
       }}
-    >
-      <SessionPinButton
-        pinned={Boolean(pref.pinned)}
-        onToggle={() => patchSessionPref(session.id, { pinned: !pref.pinned })}
-      />
-      <Link
-        href={`/agent?project=${encodeURIComponent(project.id)}&session=${encodeURIComponent(session.id)}`}
-        title={label}
-        draggable
-        onDragStart={(event) => {
-          setAgentSessionDragData(event, {
-            piSessionId: session.id,
-            projectId: project.id,
-            cwd: project.path,
-            title: label,
-          });
-        }}
-        className="flex min-w-0 flex-1 items-center gap-1 pr-5"
-      >
-        <span className="min-w-0 flex-1 truncate text-[12px] font-normal leading-7">{label}</span>
-        {age ? (
-          <span className="shrink-0 pl-2 pr-1 font-mono text-[10px] text-(--dim)">{age}</span>
-        ) : null}
-      </Link>
-      <div ref={menuRef} className="absolute right-2 top-1/2 -translate-y-1/2 shrink-0">
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setMenuOpen((value) => !value);
-          }}
-          className="p-0.5 text-(--dim) opacity-0 hover:text-(--fg) group-hover:opacity-100"
-          aria-label="Session options"
-          title="Session options"
-        >
-          <MoreIcon className="h-3 w-3" />
-        </button>
-        {menuOpen ? (
-          <div className="absolute right-0 top-5 z-50 min-w-[140px] rounded-md border border-(--border) bg-(--bg) p-1 text-xs shadow-lg">
-            <SessionMenuItem
-              onClick={() => {
-                setMenuOpen(false);
-                setDraft(pref.title ?? session.firstUserMessage ?? "");
-                setRenaming(true);
-              }}
-            >
-              Rename
-            </SessionMenuItem>
-            <SessionMenuItem
-              onClick={() => {
-                setMenuOpen(false);
-                patchSessionPref(session.id, { pinned: !pref.pinned });
-              }}
-            >
-              {pref.pinned ? (
-                <span className="inline-flex items-center gap-2">
-                  <PinIcon className="h-4 w-4" /> Unpin
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-2">
-                  <PinIcon className="h-4 w-4" /> Pin
-                </span>
-              )}
-            </SessionMenuItem>
-            <SessionMenuItem
-              onClick={() => {
-                setMenuOpen(false);
-                patchSessionPref(session.id, { hidden: !pref.hidden });
-              }}
-            >
-              <span className="inline-flex items-center gap-2">
-                <EyeOffIcon className="h-4 w-4" /> {pref.hidden ? "Unarchive" : "Archive"}
-              </span>
-            </SessionMenuItem>
-            {pref.title || pref.pinned || pref.hidden ? (
-              <SessionMenuItem
-                onClick={() => {
-                  setMenuOpen(false);
-                  patchSessionPref(session.id, {
-                    title: undefined,
-                    pinned: undefined,
-                    hidden: undefined,
-                  });
-                }}
-              >
-                <span className="inline-flex items-center gap-2 text-(--err)">
-                  <CloseIcon className="h-4 w-4" /> Clear
-                </span>
-              </SessionMenuItem>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
+      onContextMenu
+      showClearAction
+      menuItemsWithIcons
+    />
   );
 }
 
@@ -1238,7 +1214,7 @@ function SessionMenuItem({
     <button
       type="button"
       onClick={onClick}
-      className="block w-full px-2 py-1 text-left text-xs text-(--fg) hover:bg-(--surface)"
+      className="block w-full rounded-sm px-2 py-1 text-left text-xs text-(--fg) hover:bg-[#242424]"
     >
       {children}
     </button>

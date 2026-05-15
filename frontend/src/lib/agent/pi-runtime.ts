@@ -1,7 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, realpath, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { getApiSettings, type ApiSettings } from "@/lib/api-settings";
@@ -9,7 +7,15 @@ import { resolveDataDir } from "@/lib/data-dir";
 import { normalizeOpenAIModels, modelsToPiModels, type AgentModel } from "./models";
 import { isAgentEndEvent } from "./pi-events";
 import { piPathEnv, resolvePiLaunchCommand } from "./pi-binary";
-import { listProjectsFromStore } from "./projects-store";
+import {
+  buildPiLaunchPlan,
+  normalizeBackendUrl,
+  pluginFingerprint,
+  resolveAgentCwd,
+  resolveComputerUseApp,
+  type RuntimePluginRef,
+  type RuntimeStartOptions,
+} from "./pi-runtime-helpers";
 
 const PROVIDER_ID = "vllm-studio";
 const DEFAULT_SESSION_ID = "default";
@@ -37,177 +43,6 @@ type PendingCommand = {
   reject: (error: Error) => void;
 };
 
-type RuntimePluginRef = {
-  id?: string;
-  name?: string;
-  path?: string;
-  skillPath?: string;
-  mcpConfigPath?: string;
-  appConfigPath?: string;
-  appIds?: string[];
-  appPath?: string;
-};
-
-type RuntimeSkillRef = {
-  id?: string;
-  name?: string;
-  path?: string;
-};
-
-type RuntimeStartOptions = {
-  browserToolEnabled?: boolean;
-  plugins?: RuntimePluginRef[];
-  skills?: RuntimeSkillRef[];
-};
-
-function normalizeBackendUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "");
-}
-
-function resolveDefaultAgentCwd(): string {
-  // Explicit override always wins.
-  if (process.env.VLLM_STUDIO_AGENT_CWD) return process.env.VLLM_STUDIO_AGENT_CWD;
-
-  // In a packaged Electron app, process.cwd() is "/" — useless as a working
-  // directory for the coding agent. If the renderer hasn't picked a project,
-  // fall back to the most recently added project on disk, then to $HOME.
-  try {
-    const projects = listProjectsFromStore();
-    const usable = projects.find((entry) => entry.exists);
-    if (usable) return usable.path;
-  } catch {
-    // ignore — projects.json may not exist yet
-  }
-
-  // Dev: if cwd is the frontend/ dir, use the repo root.
-  const cwd = process.cwd();
-  if (path.basename(cwd) === "frontend") return path.resolve(cwd, "..");
-
-  // Bare process.cwd() === "/" is unusable; prefer $HOME.
-  if (cwd === "/" || cwd === "") return homedir();
-  return cwd;
-}
-
-function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith(`~${path.sep}`)) return path.join(homedir(), value.slice(2));
-  return value;
-}
-
-async function resolveAgentCwd(input?: string): Promise<string> {
-  const defaultCwd = resolveDefaultAgentCwd();
-  const raw = input?.trim() || defaultCwd;
-  const expanded = expandHome(raw);
-  const candidate = path.isAbsolute(expanded) ? expanded : path.resolve(defaultCwd, expanded);
-  const resolved = await realpath(candidate);
-  const info = await stat(resolved);
-  if (!info.isDirectory()) {
-    throw new Error(`Agent cwd is not a directory: ${resolved}`);
-  }
-  return resolved;
-}
-
-// Locate bundled Pi extensions. In dev they sit next to the source files;
-// in a packaged Electron app they ship under
-// process.resourcesPath/desktop/resources/pi-extensions/. We accept either.
-function resolveBundledPiExtensionPath(fileName: string, envOverride?: string): string | null {
-  const candidates = [
-    envOverride,
-    process.resourcesPath
-      ? path.join(process.resourcesPath, "desktop", "resources", "pi-extensions", fileName)
-      : null,
-    path.resolve(process.cwd(), "frontend", "desktop", "resources", "pi-extensions", fileName),
-    path.resolve(process.cwd(), "desktop", "resources", "pi-extensions", fileName),
-    path.resolve(process.cwd(), "desktop", "resources", "pi-extensions", "dist", fileName),
-  ].filter((value): value is string => Boolean(value));
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-
-  return null;
-}
-
-// Locate the mobile extension (mobile-mcp tools; no-ops without devices).
-function resolveMobileExtensionPath(): string | null {
-  return (
-    resolveBundledPiExtensionPath("mobile.ts", process.env.VLLM_STUDIO_PI_EXTENSION_MOBILE_PATH) ??
-    resolveBundledPiExtensionPath("mobile.js")
-  );
-}
-
-// Locate the built-in verify extension (agent-side post-edit verification).
-function resolveVerifyExtensionPath(): string | null {
-  return (
-    resolveBundledPiExtensionPath("verify.ts", process.env.VLLM_STUDIO_PI_EXTENSION_VERIFY_PATH) ??
-    resolveBundledPiExtensionPath("verify.js")
-  );
-}
-
-function resolveBrowserExtensionPath(): string | null {
-  return resolveBundledPiExtensionPath(
-    "browser.ts",
-    process.env.VLLM_STUDIO_BROWSER_EXTENSION_PATH,
-  );
-}
-
-function resolveTimeoutExtensionPath(): string | null {
-  return resolveBundledPiExtensionPath(
-    "vllm-studio-timeouts.ts",
-    process.env.VLLM_STUDIO_TIMEOUT_EXTENSION_PATH,
-  );
-}
-
-function resolveMcpExtensionPath(): string | null {
-  return resolveBundledPiExtensionPath("mcp-plugin.ts", process.env.VLLM_STUDIO_MCP_EXTENSION_PATH);
-}
-
-function pluginNameMatches(plugin: RuntimePluginRef, needle: string): boolean {
-  return [
-    plugin.id,
-    plugin.name,
-    plugin.path,
-    plugin.skillPath,
-    plugin.mcpConfigPath,
-    plugin.appConfigPath,
-    plugin.appPath,
-  ]
-    .filter((value): value is string => Boolean(value))
-    .some((value) => value.toLowerCase().includes(needle));
-}
-
-function pluginFingerprint(options: RuntimeStartOptions): string {
-  const names = (options.plugins ?? [])
-    .map(
-      (plugin) =>
-        `${plugin.name ?? ""}:${plugin.path ?? ""}:${plugin.skillPath ?? ""}:${plugin.mcpConfigPath ?? ""}:${plugin.appConfigPath ?? ""}:${plugin.appIds?.join(",") ?? ""}:${plugin.appPath ?? ""}`,
-    )
-    .sort();
-  const skills = (options.skills ?? [])
-    .map((skill) => `${skill.name ?? ""}:${skill.path ?? ""}`)
-    .sort();
-  return JSON.stringify({
-    browser: options.browserToolEnabled === true,
-    plugins: names,
-    skills,
-  });
-}
-
-function resolveComputerUseApp(plugins: RuntimePluginRef[]): string | null {
-  const selected = plugins.find((plugin) => pluginNameMatches(plugin, "computer-use"));
-  const candidates = [
-    selected?.appPath,
-    selected?.path && !selected.path.endsWith(".app")
-      ? path.join(selected.path, "Codex Computer Use.app")
-      : null,
-    selected?.path,
-    "/Applications/Codex.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use/Codex Computer Use.app",
-    path.join(homedir(), ".codex", "computer-use", "Codex Computer Use.app"),
-  ].filter((value): value is string => Boolean(value));
-  return (
-    candidates.find((candidate) => candidate.endsWith(".app") && existsSync(candidate)) ?? null
-  );
-}
-
 function launchComputerUseApp(plugins: RuntimePluginRef[]) {
   if (process.platform !== "darwin") return;
   const appPath = resolveComputerUseApp(plugins);
@@ -217,76 +52,6 @@ function launchComputerUseApp(plugins: RuntimePluginRef[]) {
     stdio: "ignore",
   });
   child.unref();
-}
-
-function pluginSkillPaths(plugins: RuntimePluginRef[]): string[] {
-  return uniqueExistingPaths(
-    plugins.flatMap((plugin) => [
-      plugin.skillPath,
-      plugin.path && !plugin.path.endsWith(".app") ? path.join(plugin.path, "skills") : null,
-    ]),
-  );
-}
-
-function selectedSkillPaths(skills: RuntimeSkillRef[]): string[] {
-  return uniqueExistingPaths(skills.map((skill) => skill.path));
-}
-
-function uniqueExistingPaths(values: Array<string | null | undefined>): string[] {
-  const seen = new Set<string>();
-  return values.filter((value): value is string => {
-    if (!value || !existsSync(value)) return false;
-    const resolved = path.resolve(value);
-    if (seen.has(resolved)) return false;
-    seen.add(resolved);
-    return true;
-  });
-}
-
-function isLaunchConstrainedComputerUseMcp(configPath: string): boolean {
-  try {
-    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as {
-      mcpServers?: Record<string, { command?: unknown; args?: unknown }>;
-    };
-    return Object.entries(parsed.mcpServers ?? {}).some(([name, server]) => {
-      const marker =
-        `${name} ${String(server.command ?? "")} ${Array.isArray(server.args) ? server.args.join(" ") : ""}`.toLowerCase();
-      return marker.includes("computer-use") || marker.includes("skycomputeruseclient");
-    });
-  } catch {
-    return false;
-  }
-}
-
-function shouldLoadMcpConfig(plugin: RuntimePluginRef, configPath: string): boolean {
-  if (process.env.VLLM_STUDIO_ENABLE_CODEX_COMPUTER_USE_MCP === "1") return true;
-  return !(
-    pluginNameMatches(plugin, "computer-use") && isLaunchConstrainedComputerUseMcp(configPath)
-  );
-}
-
-function pluginMcpConfigs(
-  plugins: RuntimePluginRef[],
-): Array<{ pluginName: string; configPath: string }> {
-  const seen = new Set<string>();
-  return plugins.flatMap((plugin) => {
-    const configPath =
-      plugin.mcpConfigPath ??
-      (plugin.path && !plugin.path.endsWith(".app") ? path.join(plugin.path, ".mcp.json") : null);
-    if (!configPath || !existsSync(configPath)) return [];
-    const resolved = path.resolve(configPath);
-    if (!shouldLoadMcpConfig(plugin, resolved)) return [];
-    if (seen.has(resolved)) return [];
-    seen.add(resolved);
-    return [
-      { pluginName: plugin.name || path.basename(path.dirname(resolved)), configPath: resolved },
-    ];
-  });
-}
-
-function deriveFrontendBase(): string {
-  const port = process.env.PORT || "3000";
-  return `http://127.0.0.1:${port}`;
 }
 
 async function fetchModelsFromBackend(settings: ApiSettings): Promise<AgentModel[]> {
@@ -336,20 +101,6 @@ export async function refreshPiModels(): Promise<{ models: AgentModel[]; agentDi
   const agentDir = await writePiModelsConfig(settings, models);
   return { models, agentDir };
 }
-
-// Built-in system prompt addendum injected on every pi spawn so the model
-// knows the verification tools (registered by the verify pi-extension) exist
-// and when to call them. This is the agent-runtime equivalent of a
-// .cursor/rules/ file: shipped with vLLM Studio, no user setup required.
-const VERIFY_PROMPT_ADDENDUM = [
-  "## Built-in verification (vLLM Studio)",
-  "",
-  "After any edit_file call that touches frontend code (e.g., **/*.tsx, **/*.ts under app/, components/, src/), call verify_web with the relevant local URL (default http://127.0.0.1:3000 unless told otherwise) and checks=['screenshot']. Inspect the screenshot before reporting the change as done.",
-  "",
-  "After edits to mobile-related code (paths matching **/mobile-*, **/mobilecli*, **/mobile-mcp*, or files under api/agent/mobile/), call mobile_list_devices, then call verify_mobile against the first available device with actions=['screenshot'] (set boot=true if its state is offline).",
-  "",
-  "If a verification surfaces a regression, fix it and re-verify (you may use verify_until_pass with a clear success_criteria up to 3 iterations) before declaring the task done. Do not claim a UI change is complete without a verifying screenshot.",
-].join("\n");
 
 class PiRpcSession extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -423,76 +174,22 @@ class PiRpcSession extends EventEmitter {
     this.currentCwd = cwd;
     this.currentPiSessionId = piSessionId;
     this.currentPluginFingerprint = pluginFingerprint(options);
-    const plugins = options.plugins ?? [];
-    const skills = options.skills ?? [];
-    const shouldLoadBrowserTool =
-      options.browserToolEnabled === true ||
-      plugins.some(
-        (plugin) =>
-          pluginNameMatches(plugin, "browser-use") || pluginNameMatches(plugin, "computer-use"),
-      );
-
-    const args = [
-      "--mode",
-      "rpc",
-      "--provider",
-      PROVIDER_ID,
-      "--model",
-      `${PROVIDER_ID}/${modelId}`,
-    ];
-    if (selectedModel.reasoning) {
-      args.push("--thinking", "high");
-    }
-    if (piSessionId) {
-      // Resume a specific pi session by UUID. Pi accepts a partial UUID and
-      // resolves it within the current cwd's session directory.
-      args.push("--session", piSessionId);
-    }
-    for (const skillPath of uniqueExistingPaths([
-      ...pluginSkillPaths(plugins),
-      ...selectedSkillPaths(skills),
-    ])) {
-      args.push("--skill", skillPath);
-    }
-    const mcpConfigs = pluginMcpConfigs(plugins);
-    const timeoutExtensionPath = resolveTimeoutExtensionPath();
-    if (timeoutExtensionPath) args.push("--extension", timeoutExtensionPath);
-    if (mcpConfigs.length) {
-      const mcpExtensionPath = resolveMcpExtensionPath();
-      if (mcpExtensionPath) args.push("--extension", mcpExtensionPath);
-    }
-    if (shouldLoadBrowserTool) {
-      const extensionPath = resolveBrowserExtensionPath();
-      if (extensionPath) args.push("--extension", extensionPath);
-    }
-    launchComputerUseApp(plugins);
-
-    // Always load mobile extension if available - tools are no-ops without devices
-    const mobileExtensionPath = resolveMobileExtensionPath();
-    if (mobileExtensionPath) args.push("--extension", mobileExtensionPath);
-
-    // Always load the built-in verify extension; agent-side post-edit
-    // verification is on by default in vLLM Studio.
-    const verifyExtensionPath = resolveVerifyExtensionPath();
-    if (verifyExtensionPath) args.push("--extension", verifyExtensionPath);
-
-    // Inject the built-in verify prompt addendum so the model knows when
-    // to call verify_web / verify_mobile / verify_until_pass.
-    args.push("--append-system-prompt", VERIFY_PROMPT_ADDENDUM);
+    const launchPlan = buildPiLaunchPlan({
+      agentDir,
+      modelId,
+      options,
+      pathEnv: piPathEnv(),
+      piSessionId,
+      processEnv: process.env,
+      providerId: PROVIDER_ID,
+      selectedModel,
+    });
+    launchComputerUseApp(launchPlan.plugins);
 
     const launch = resolvePiLaunchCommand();
-    const child = spawn(launch.command, [...launch.argsPrefix, ...args], {
+    const child = spawn(launch.command, [...launch.argsPrefix, ...launchPlan.args], {
       cwd,
-      env: {
-        ...process.env,
-        PATH: piPathEnv(),
-        PI_CODING_AGENT_DIR: agentDir,
-        PI_SKIP_VERSION_CHECK: "1",
-        // The browser extension uses this base URL to call back into the
-        // frontend's /api/agent/browser/* endpoints.
-        VLLM_STUDIO_FRONTEND_BASE: process.env.VLLM_STUDIO_FRONTEND_BASE ?? deriveFrontendBase(),
-        VLLM_STUDIO_MCP_PLUGIN_CONFIGS: JSON.stringify(mcpConfigs),
-      },
+      env: launchPlan.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
 

@@ -18,6 +18,13 @@ export type ActiveAgentSessionSnapshot = {
 
 export type ActiveSessionPrefs = Record<string, { hidden?: boolean }>;
 
+type MergeTarget = {
+  key: string;
+  tabKey: string;
+  existing?: ActiveAgentSessionSnapshot;
+  existingFromIncoming: boolean;
+};
+
 function sessionStorageKey(session: ActiveAgentSessionSnapshot): string {
   return session.piSessionId
     ? `pi:${session.piSessionId}`
@@ -33,47 +40,127 @@ function startTime(session: ActiveAgentSessionSnapshot): number {
   return Number.isFinite(value) ? value : 0;
 }
 
+function updateTime(session: ActiveAgentSessionSnapshot): number {
+  const value = Date.parse(session.updatedAt);
+  return Number.isFinite(value) ? value : startTime(session);
+}
+
+function normalizeSingleActive(
+  sessions: ActiveAgentSessionSnapshot[],
+): ActiveAgentSessionSnapshot[] {
+  const active = sessions.filter((session) => session.active);
+  if (active.length <= 1) return sessions;
+  const keep = active.reduce((latest, session) =>
+    updateTime(session) > updateTime(latest) ? session : latest,
+  );
+  return sessions.map((session) => (session === keep ? session : { ...session, active: false }));
+}
+
+function findPiKeyForTab(
+  byKey: Map<string, ActiveAgentSessionSnapshot>,
+  session: ActiveAgentSessionSnapshot,
+): string | undefined {
+  return [...byKey.entries()].find(
+    ([, value]) =>
+      value.paneId === session.paneId && value.tabId === session.tabId && value.piSessionId,
+  )?.[0];
+}
+
+function resolveMergeTarget(
+  byKey: Map<string, ActiveAgentSessionSnapshot>,
+  incomingKeys: Set<string>,
+  session: ActiveAgentSessionSnapshot,
+): MergeTarget {
+  const tabKey = `tab:${session.paneId}:${session.tabId}`;
+  const existingTab = byKey.get(tabKey);
+  const existingPiKey = findPiKeyForTab(byKey, session);
+  if (session.piSessionId) byKey.delete(tabKey);
+  const key = session.piSessionId ? `pi:${session.piSessionId}` : (existingPiKey ?? tabKey);
+  return {
+    key,
+    tabKey,
+    existing: byKey.get(key) ?? existingTab,
+    existingFromIncoming:
+      incomingKeys.has(key) ||
+      incomingKeys.has(tabKey) ||
+      Boolean(existingPiKey && incomingKeys.has(existingPiKey)),
+  };
+}
+
+function preferText(value: string, fallback: string): string {
+  return value || fallback;
+}
+
+function preferDefined<T>(value: T | undefined, fallback: T): T {
+  return value ?? fallback;
+}
+
+function preferNullable<T>(value: T | null | undefined, fallback: T | null): T | null {
+  return value ?? fallback;
+}
+
+function preserveActiveSnapshot(
+  session: ActiveAgentSessionSnapshot,
+  existing: ActiveAgentSessionSnapshot,
+): ActiveAgentSessionSnapshot {
+  return {
+    ...existing,
+    title: preferText(session.title, existing.title),
+    status: preferText(session.status, existing.status),
+    updatedAt: preferText(session.updatedAt, existing.updatedAt),
+    piSessionId: preferNullable(session.piSessionId, existing.piSessionId),
+    startedAt: preferDefined(
+      existing.startedAt,
+      preferDefined(session.startedAt, session.updatedAt),
+    ),
+    plugins: preferDefined(session.plugins, existing.plugins),
+    skills: preferDefined(session.skills, existing.skills),
+  };
+}
+
+function applyIncomingSnapshot(
+  session: ActiveAgentSessionSnapshot,
+  target: MergeTarget,
+): ActiveAgentSessionSnapshot {
+  return {
+    ...target.existing,
+    ...session,
+    piSessionId: preferNullable(session.piSessionId, target.existing?.piSessionId ?? null),
+    startedAt: preferDefined(
+      target.existing?.startedAt,
+      preferDefined(session.startedAt, session.updatedAt),
+    ),
+    plugins: preferDefined(session.plugins, target.existing?.plugins),
+    skills: preferDefined(session.skills, target.existing?.skills),
+  };
+}
+
+function mergeSessionSnapshot(
+  session: ActiveAgentSessionSnapshot,
+  target: MergeTarget,
+): ActiveAgentSessionSnapshot {
+  const existing = target.existing;
+  if (existing?.active && !session.active && target.existingFromIncoming) {
+    return preserveActiveSnapshot(session, existing);
+  }
+  return applyIncomingSnapshot(session, target);
+}
+
 export function mergeActiveAgentSessions(
   previous: ActiveAgentSessionSnapshot[],
   incoming: ActiveAgentSessionSnapshot[],
   prefs: ActiveSessionPrefs = {},
 ): ActiveAgentSessionSnapshot[] {
   const byKey = new Map<string, ActiveAgentSessionSnapshot>();
+  const incomingKeys = new Set<string>();
   for (const session of previous) {
     if (!isHidden(session, prefs)) byKey.set(sessionStorageKey(session), session);
   }
   for (const session of incoming) {
     if (isHidden(session, prefs)) continue;
-    const tabKey = `tab:${session.paneId}:${session.tabId}`;
-    const existingTab = byKey.get(tabKey);
-    const existingPiKey = [...byKey.entries()].find(
-      ([, value]) =>
-        value.paneId === session.paneId && value.tabId === session.tabId && value.piSessionId,
-    )?.[0];
-    if (session.piSessionId) byKey.delete(tabKey);
-    const key = session.piSessionId ? `pi:${session.piSessionId}` : (existingPiKey ?? tabKey);
-    const existing = byKey.get(key) ?? existingTab;
-    if (existing?.active && !session.active) {
-      byKey.set(key, {
-        ...existing,
-        title: session.title || existing.title,
-        status: session.status || existing.status,
-        updatedAt: session.updatedAt || existing.updatedAt,
-        piSessionId: session.piSessionId ?? existing.piSessionId ?? null,
-        startedAt: existing.startedAt ?? session.startedAt ?? session.updatedAt,
-        plugins: session.plugins ?? existing.plugins,
-        skills: session.skills ?? existing.skills,
-      });
-    } else {
-      byKey.set(key, {
-        ...existing,
-        ...session,
-        piSessionId: session.piSessionId ?? existing?.piSessionId ?? null,
-        startedAt: existing?.startedAt ?? session.startedAt ?? session.updatedAt,
-        plugins: session.plugins ?? existing?.plugins,
-        skills: session.skills ?? existing?.skills,
-      });
-    }
+    const target = resolveMergeTarget(byKey, incomingKeys, session);
+    byKey.set(target.key, mergeSessionSnapshot(session, target));
+    incomingKeys.add(target.key);
   }
-  return [...byKey.values()].sort((a, b) => startTime(b) - startTime(a));
+  return normalizeSingleActive([...byKey.values()].sort((a, b) => startTime(b) - startTime(a)));
 }

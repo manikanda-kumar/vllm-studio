@@ -104,4 +104,42 @@ describe("mergeActiveAgentSessions", () => {
       active: true,
     });
   });
+
+  it("accepts inactive updates for rows from a new broadcast", () => {
+    const merged = mergeActiveAgentSessions(
+      [session({ piSessionId: "pi-a", title: "active", active: true })],
+      [session({ piSessionId: "pi-a", title: "inactive", active: false })],
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      piSessionId: "pi-a",
+      title: "inactive",
+      active: false,
+    });
+  });
+
+  it("normalizes stale snapshots down to one active row", () => {
+    const merged = mergeActiveAgentSessions(
+      [
+        session({
+          piSessionId: "pi-old",
+          title: "old",
+          active: true,
+          updatedAt: "2026-05-10T00:00:00.000Z",
+        }),
+        session({
+          piSessionId: "pi-new",
+          tabId: "tab-2",
+          title: "new",
+          active: true,
+          updatedAt: "2026-05-10T00:05:00.000Z",
+        }),
+      ],
+      [],
+    );
+
+    expect(merged.filter((entry) => entry.active)).toHaveLength(1);
+    expect(merged.find((entry) => entry.active)).toMatchObject({ piSessionId: "pi-new" });
+  });
 });

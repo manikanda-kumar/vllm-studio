@@ -2,7 +2,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useAppStore } from "@/store";
 import {
   Archive,
   Cable,
@@ -32,6 +31,8 @@ import {
   type SettingsSectionId,
   type StatusTone,
 } from "@/components/settings-primitives";
+import { SESSION_PREFS_CHANGED_EVENT } from "@/lib/agent/workspace/events";
+import { SESSION_PREFS_KEY } from "@/lib/agent/workspace/store";
 
 interface ConfigsViewProps {
   data: ConfigData | null;
@@ -56,45 +57,34 @@ interface ConfigsViewProps {
 
 const sectionIcon = (Icon: LucideIcon) => <Icon className="h-3.5 w-3.5" />;
 
-type SectionTuple = [SettingsSectionId, string, string, LucideIcon, boolean];
-
-// Last tuple element: visible in lite mode (agent-desktop only). Infra-heavy
-// sections (engines/services/system) stay hidden when vLLM is org-managed.
-const SECTION_TUPLES: SectionTuple[] = [
-  ["connection", "Connection", "Controller URL, API key, voice defaults.", Cable, true],
-  [
-    "engines",
-    "Engines / Services / System",
-    "Runtime targets, services, storage, hardware.",
-    Cpu,
-    false,
-  ],
-  ["appearance", "Appearance", "Theme variables, typography, density.", Paintbrush, true],
-  ["archive", "Archived chats", "Hidden Pi sessions tracked by stable ID.", Archive, true],
-  ["plugins", "Plugins", "Codex plugin discovery and composer availability.", Plug, true],
+const SECTIONS: SettingsSectionDef[] = [
+  ["connection", "Connection", "Controller URL, API key, voice defaults.", Cable],
+  ["system", "System", "Runtime targets, services, storage, hardware.", Cpu],
+  ["appearance", "Appearance", "Theme variables, typography, density.", Paintbrush],
+  ["archive", "Archived chats", "Hidden Pi sessions tracked by stable ID.", Archive],
+  ["plugins", "Plugins", "Codex plugin discovery and composer availability.", Plug],
   [
     "skills",
     "Skills",
     "Normalized local skills from Codex, Pi, Claude, Factory, OpenCode.",
     GraduationCap,
-    true,
   ],
-  ["setup", "Setup", "First-run checks for Pi, controller, and local directories.", ServerCog, true],
-];
-
-const SECTIONS: SettingsSectionDef[] = SECTION_TUPLES.map(([id, label, description, Icon]) => ({
-  id,
-  label,
-  description,
-  icon: sectionIcon(Icon),
+  ["setup", "Setup", "First-run checks for Pi, controller, and local directories.", ServerCog],
+].map(([id, label, description, Icon]) => ({
+  id: id as SettingsSectionId,
+  label: label as string,
+  description: description as string,
+  icon: sectionIcon(Icon as LucideIcon),
 }));
-
-const LITE_SECTION_IDS = new Set(
-  SECTION_TUPLES.filter(([, , , , lite]) => lite).map(([id]) => id),
-);
 
 const isSectionId = (value: string): value is SettingsSectionId =>
   SECTIONS.some((section) => section.id === value);
+
+const normalizeSectionId = (value: string): SettingsSectionId | null => {
+  if (isSectionId(value)) return value;
+  if (value === "engines" || value === "services") return "system";
+  return null;
+};
 
 export function ConfigsView({
   data,
@@ -116,33 +106,25 @@ export function ConfigsView({
   onTestConnection,
   onSaveSettings,
 }: ConfigsViewProps) {
-  const liteMode = useAppStore((s) => s.liteMode);
-  const visibleSections = useMemo(
-    () => (liteMode ? SECTIONS.filter((s) => LITE_SECTION_IDS.has(s.id)) : SECTIONS),
-    [liteMode],
-  );
-  const [rawActiveSection, setRawActiveSection] = useState<SettingsSectionId>(() => {
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => {
     if (typeof window === "undefined") return "connection";
     const hash = window.location.hash.replace("#", "");
-    return isSectionId(hash) ? hash : "connection";
+    return normalizeSectionId(hash) ?? "connection";
   });
-  // Derive the effective section instead of syncing via effect: in lite mode an
-  // infra section that isn't exposed falls back to "connection".
-  const activeSection: SettingsSectionId =
-    liteMode && !LITE_SECTION_IDS.has(rawActiveSection) ? "connection" : rawActiveSection;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onHashChange = () => {
       const hash = window.location.hash.replace("#", "");
-      if (isSectionId(hash)) setRawActiveSection(hash);
+      const normalized = normalizeSectionId(hash);
+      if (normalized) setActiveSection(normalized);
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   const selectSection = (section: SettingsSectionId) => {
-    setRawActiveSection(section);
+    setActiveSection(section);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `#${section}`);
     }
@@ -158,7 +140,7 @@ export function ConfigsView({
 
   return (
     <SettingsLayout
-      sections={visibleSections}
+      sections={SECTIONS}
       activeSection={activeSection}
       title="Settings"
       status={layoutStatus}
@@ -182,7 +164,7 @@ export function ConfigsView({
         />
       ) : null}
 
-      {activeSection === "engines" ? (
+      {activeSection === "system" ? (
         <div className="space-y-5">
           <EnginesSection runtime={data?.runtime ?? null} />
           <ServicesSettings data={data} apiSettings={apiSettings} loading={loading} error={error} />
@@ -487,7 +469,7 @@ function ArchivedChatsSettings() {
   const [prefs, setPrefs] = useState<Record<string, Pref>>(() => {
     if (typeof window === "undefined") return {};
     try {
-      const raw = localStorage.getItem("vllm-studio.agent.sessionPrefs");
+      const raw = localStorage.getItem(SESSION_PREFS_KEY);
       return raw ? (JSON.parse(raw) as Record<string, Pref>) : {};
     } catch {
       return {};
@@ -510,8 +492,8 @@ function ArchivedChatsSettings() {
   const unarchive = (id: string) => {
     const next = { ...prefs, [id]: { ...prefs[id], hidden: undefined } };
     if (!next[id].title && !next[id].pinned && !next[id].hidden) delete next[id];
-    localStorage.setItem("vllm-studio.agent.sessionPrefs", JSON.stringify(next));
-    window.dispatchEvent(new Event("vllm-studio.agent.sessionPrefs.changed"));
+    localStorage.setItem(SESSION_PREFS_KEY, JSON.stringify(next));
+    window.dispatchEvent(new Event(SESSION_PREFS_CHANGED_EVENT));
     setPrefs(next);
   };
 
